@@ -399,5 +399,8 @@
   "UUID в виде строки": "dize biçiminde UUID",
   "объект параметров COM-порта": "COM bağlantı noktası ayarları nesnesi",
   "список HTTP-заголовков": "HTTP üst bilgileri listesi",
-  "объект заголовка": "üst bilgi nesnesi"
+  "объект заголовка": "üst bilgi nesnesi",
+  "Результат": "Sonuç",
+  "Успех %1%": "Başarı %1%",
+  "Среднее время завершённых запросов": "Tamamlanan isteklerin ortalama süresi"
 }

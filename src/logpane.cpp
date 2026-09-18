@@ -50,6 +50,32 @@
 
 namespace {
 
+class JournalSymbol final : public QWidget
+{
+public:
+    JournalSymbol(QString name, int size, QWidget *parent)
+        : QWidget(parent), m_name(std::move(name))
+    {
+        setFixedSize(size, size);
+        setAttribute(Qt::WA_TransparentForMouseEvents);
+    }
+protected:
+    void paintEvent(QPaintEvent *) override
+    {
+        QPainter painter(this);
+        if (m_name == QStringLiteral("success")) {
+            painter.setRenderHint(QPainter::Antialiasing);
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(AppTheme::color(u"accent"));
+            painter.drawEllipse(QRectF((width() - 5) / 2.0, (height() - 5) / 2.0, 5, 5));
+        } else {
+            AppTheme::icon(m_name).paint(&painter, rect());
+        }
+    }
+private:
+    QString m_name;
+};
+
 class JournalView final : public QTableView
 {
 public:
@@ -78,6 +104,8 @@ public:
         initStyleOption(&opt, index);
         opt.state &= ~QStyle::State_HasFocus;
         opt.font.setWeight(QFont::Normal);
+        if (index.column() == RequestLogModel::RequestColumn)
+            opt.font.setWeight(QFont::DemiBold);
         opt.font.setPixelSize(11);
         if (index.column() == RequestLogModel::TimeColumn
             || index.column() == RequestLogModel::DurationColumn
@@ -132,7 +160,8 @@ public:
                 }
             }
             QFont badgeFont = option.font;
-            badgeFont.setWeight(QFont::Medium);
+            badgeFont.setWeight(index.column() == RequestLogModel::RequestColumn
+                                    ? QFont::DemiBold : QFont::Medium);
             badgeFont.setPixelSize(9);
             const QFontMetrics fm(badgeFont);
             const int badgeWidth = index.column() == RequestLogModel::RequestColumn
@@ -404,17 +433,33 @@ LogPane::LogPane(RequestLogModel *model, const QByteArray &splitterState, bool a
     auto *tools = new QHBoxLayout(toolbar);
     tools->setContentsMargins(10, 6, 10, 6);
     tools->setSpacing(8);
-    tools->addWidget(label(UiLanguage::text("Журнал"), QStringLiteral("sectionTitle"), toolbar));
-    m_count = label(QStringLiteral("0"), QStringLiteral("countBadge"), toolbar);
-    tools->addWidget(m_count);
+    tools->addWidget(new JournalSymbol(QStringLiteral("terminal"), 15, toolbar), 0, Qt::AlignVCenter);
+    tools->addWidget(label(UiLanguage::text("Журнал"), QStringLiteral("sectionTitle"), toolbar), 0, Qt::AlignVCenter);
+    m_count = label(QStringLiteral("0"), QStringLiteral("journalCountBadge"), toolbar);
+    m_count->setAlignment(Qt::AlignCenter);
+    m_count->setFixedHeight(18);
+    m_count->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
+    tools->addWidget(m_count, 0, Qt::AlignVCenter);
     m_live = label(QStringLiteral("LIVE"), QStringLiteral("statusPill"), toolbar);
     m_live->setProperty("state", QStringLiteral("running"));
     m_live->setToolTip(UiLanguage::text("Есть незавершённые запросы"));
     m_live->hide();
     tools->addWidget(m_live);
-    m_statistics = new ElidedLabel(toolbar);
+    auto *statistics = new QWidget(toolbar);
+    auto *statisticsLayout = new QHBoxLayout(statistics);
+    statisticsLayout->setContentsMargins(0, 0, 0, 0);
+    statisticsLayout->setSpacing(5);
+    m_successDot = new JournalSymbol(QStringLiteral("success"), 10, statistics);
+    statisticsLayout->addWidget(m_successDot, 0, Qt::AlignVCenter);
+    m_statistics = new QLabel(statistics);
     m_statistics->setObjectName(QStringLiteral("fieldLabel"));
-    tools->addWidget(m_statistics, 1);
+    statisticsLayout->addWidget(m_statistics, 0, Qt::AlignVCenter);
+    statisticsLayout->addSpacing(10);
+    statisticsLayout->addWidget(new JournalSymbol(QStringLiteral("clock"), 12, statistics), 0, Qt::AlignVCenter);
+    m_meanDuration = label(QStringLiteral("—"), QStringLiteral("fieldLabel"), statistics);
+    statisticsLayout->addWidget(m_meanDuration, 0, Qt::AlignVCenter);
+    tools->addWidget(statistics, 0, Qt::AlignVCenter);
+    tools->addStretch(1);
     m_search = new QLineEdit(toolbar);
     m_search->setPlaceholderText(UiLanguage::text("Поиск в журнале"));
     m_search->setAccessibleName(UiLanguage::text("Поиск в журнале"));
@@ -914,9 +959,12 @@ void LogPane::updateResultCount()
         }
     }
     const QString summary = completed > 0
-        ? UiLanguage::text("Успех %1% · %2 мс").arg(100.0 * successful / completed, 0, 'f', 0).arg(duration / completed)
+        ? UiLanguage::text("Успех %1%").arg(100.0 * successful / completed, 0, 'f', 0)
         : UiLanguage::text("Нет завершённых");
-    static_cast<ElidedLabel *>(m_statistics)->setContent(summary);
+    m_statistics->setText(summary);
+    m_successDot->setVisible(completed > 0);
+    m_meanDuration->setText(completed > 0 ? UiLanguage::text("%1 мс").arg(duration / completed) : QStringLiteral("—"));
+    m_meanDuration->setToolTip(UiLanguage::text("Среднее время завершённых запросов"));
     m_statistics->setToolTip(UiLanguage::text("Среди показанных записей: успешных %1 из %2 завершённых.\n"
         "Среднее время не включает ожидание, отменённые и пропущенные записи.").arg(successful).arg(completed));
     m_live->setVisible(pending > 0);

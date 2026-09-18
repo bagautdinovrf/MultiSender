@@ -82,6 +82,8 @@ private:
     QAction *m_exportCsv = nullptr;
     QLabel *m_count = nullptr;
     QLabel *m_statistics = nullptr;
+    QLabel *m_meanDuration = nullptr;
+    QWidget *m_successDot = nullptr;
     QLabel *m_live = nullptr;
     QLabel *m_emptyTitle = nullptr;
     QLabel *m_emptyHint = nullptr;

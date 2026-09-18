@@ -287,6 +287,7 @@ QString styleSheet()
         QLabel#workspaceHomeCaption { color: @muted; font-size: 10px; }
         QLabel#emptyTitle, QLabel#logEmptyTitle { font-size: 15px; font-weight: 500; }
         QLabel#countBadge { background: @raised; color: @secondary; padding: 1px 6px; border-radius: 4px; font-size: 10px; }
+        QLabel#journalCountBadge { background: transparent; color: @secondary; border: 1px solid @line; padding: 0 5px; border-radius: 4px; font-size: 9px; }
         QLabel#statusText, QLabel#savedStatus { color: @muted; font-size: 10px; }
         QLabel#savedStatus { color: @secondary; }
         QWidget#logEmptyState { background: @bg; }

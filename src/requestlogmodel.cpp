@@ -127,7 +127,7 @@ QVariant RequestLogModel::headerData(int section, Qt::Orientation orientation, i
     case MethodColumn:
         return UiLanguage::text("Протокол / метод");
     case StatusColumn:
-        return UiLanguage::text("Статус");
+        return UiLanguage::text("Результат");
     case DurationColumn:
         return UiLanguage::text("Задержка");
     case UrlColumn:

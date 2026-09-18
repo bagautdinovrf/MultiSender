@@ -399,5 +399,8 @@
   "UUID в виде строки": "UUID como string",
   "объект параметров COM-порта": "objeto de configurações da porta COM",
   "список HTTP-заголовков": "lista de cabeçalhos HTTP",
-  "объект заголовка": "objeto de cabeçalho"
+  "объект заголовка": "objeto de cabeçalho",
+  "Результат": "Resultado",
+  "Успех %1%": "Sucesso %1%",
+  "Среднее время завершённых запросов": "Duração média das solicitações concluídas"
 }
