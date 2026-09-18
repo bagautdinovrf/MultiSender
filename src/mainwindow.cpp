@@ -194,6 +194,7 @@ public:
             const QRect countRect = QStyle::visualRect(item.direction, item.rect,
                 QRect(item.rect.right() - countWidth + 1, item.rect.top(), countWidth, item.rect.height()));
             item.font.setWeight(QFont::DemiBold);
+            item.font.setPixelSize(12);
             item.fontMetrics = QFontMetrics(item.font);
             if (m_tree->isRightToLeft()) item.rect.adjust(countWidth, 0, 0, 0);
             else item.rect.adjust(0, 0, -countWidth, 0);
