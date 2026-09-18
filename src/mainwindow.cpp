@@ -90,7 +90,7 @@ protected:
     void paintEvent(QPaintEvent *) override
     {
         QPainter painter(this);
-        AppTheme::icon(m_name).paint(&painter, rect());
+        AppTheme::icon(m_name).paint(&painter, contentsRect());
     }
 private:
     QString m_name;
@@ -2602,6 +2602,10 @@ void MainWindow::openCollection(const QUuid &collectionId)
     tab->setProperty("id", collectionId.toString(QUuid::WithoutBraces));
     m_collectionTabs.insert(collectionId, tab);
     const int index = m_tabs->addTab(tab, UiLanguage::text("Коллекция · %1").arg(definition->name));
+    auto *folder = new ThemeIcon(QStringLiteral("folder"), m_tabs->tabBar());
+    folder->setFixedSize(24, 16);
+    folder->setContentsMargins(4, 0, 4, 0);
+    m_tabs->tabBar()->setTabButton(index, QTabBar::LeftSide, folder);
     addTabCloseButton(tab, index);
     m_tabs->setCurrentIndex(index);
     refreshCollectionTab(collectionId);
