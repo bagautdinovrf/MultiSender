@@ -44,7 +44,7 @@ CodeEditor::CodeEditor(QWidget *parent)
     setObjectName(QStringLiteral("codeEditor"));
     setLayoutDirection(Qt::LeftToRight);
     QFont codeFont(QStringLiteral("Consolas"));
-    codeFont.setPixelSize(12);
+    codeFont.setPixelSize(11);
     codeFont.setStyleHint(QFont::Monospace);
     codeFont.setStyleStrategy(QFont::PreferAntialias);
     codeFont.setHintingPreference(QFont::PreferNoHinting);

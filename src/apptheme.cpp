@@ -232,7 +232,7 @@ QColor operationColor(QStringView operation)
 QString styleSheet()
 {
     QString sheet = QStringLiteral(R"(
-        QWidget { color: @text; font-family: "@interfaceFont"; font-size: 13px; }
+        QWidget { color: @text; font-family: "@interfaceFont"; font-size: 12px; }
         QMainWindow, QDialog, QMessageBox, QWidget#centralWidget { background: @bg; }
         QWidget#sidebar { background: @sidebar; border-right: 1px solid @lineSoft; }
         QWidget#appHeader { background: @sidebar; border-bottom: 1px solid @lineSoft; }
@@ -242,37 +242,37 @@ QString styleSheet()
         QScrollArea { border: none; background: transparent; }
         QScrollArea#requestEditorScrollArea > QWidget { background: @bg; }
         QLabel { background: transparent; border: none; }
-        QLabel#appTitle { font-size: 15px; font-weight: 600; }
+        QLabel#appTitle { font-size: 14px; font-weight: 600; }
         QLabel#brandMark { background: @accentSoft; color: @accent; border: 1px solid @accentLine; border-radius: 8px; font-size: 19px; font-weight: 600; }
-        QLabel#appEdition { color: @muted; font-size: 10px; padding: 2px 6px; border: 1px solid @lineSoft; border-radius: 4px; }
-        QLabel#workspaceCaption { color: @secondary; font-size: 12px; }
-        QLabel#sidebarTitle { color: @text; font-size: 15px; font-weight: 600; }
-        QLabel#sidebarSection { color: @muted; font-size: 11px; font-weight: 600; }
-        QLabel#sectionTitle { font-size: 13px; font-weight: 600; }
-        QLabel#editableTitleLabel { font-size: 17px; font-weight: 500; padding: 2px 0; }
-        QLineEdit#editableTitleEdit { font-size: 17px; font-weight: 500; padding: 3px 7px; }
-        QFrame#requestEditorCard QLabel#editableTitleLabel, QFrame#requestEditorCard QLineEdit#editableTitleEdit { font-size: 15px; font-weight: 500; }
+        QLabel#appEdition { color: @muted; font-size: 9px; padding: 2px 6px; border: 1px solid @lineSoft; border-radius: 4px; }
+        QLabel#workspaceCaption { color: @secondary; font-size: 11px; }
+        QLabel#sidebarTitle { color: @text; font-size: 14px; font-weight: 600; }
+        QLabel#sidebarSection { color: @muted; font-size: 10px; font-weight: 600; }
+        QLabel#sectionTitle { font-size: 12px; font-weight: 600; }
+        QLabel#editableTitleLabel { font-size: 16px; font-weight: 500; padding: 2px 0; }
+        QLineEdit#editableTitleEdit { font-size: 16px; font-weight: 500; padding: 3px 7px; }
+        QFrame#requestEditorCard QLabel#editableTitleLabel, QFrame#requestEditorCard QLineEdit#editableTitleEdit { font-size: 14px; font-weight: 500; }
         QFrame#collectionEditorCard QLabel#editableTitleLabel { font-size: 23px; }
-        QLabel#fieldLabel, QLabel#statName { color: @muted; font-size: 11px; }
-        QLabel#statValue { font-size: 17px; font-weight: 500; }
-        QLabel#subtitleLabel, QLabel#urlSummary, QLabel#emptyHint, QLabel#helperText { color: @secondary; font-size: 12px; }
-        QLabel#urlSummary { font-family: "Consolas"; color: @muted; font-size: 11px; }
-        QLabel#detailsMetadata { color: @muted; background: transparent; border: none; padding: 2px 0; font-family: "Consolas"; font-size: 11px; }
-        QLabel#connectionSummary { color: @muted; font-size: 11px; }
-        QLabel#eyebrow { color: @muted; font-size: 11px; font-weight: 600; }
-        QLabel#statusPill { border: 1px solid @line; border-radius: 5px; padding: 3px 8px; font-size: 11px; background: transparent; color: @secondary; }
+        QLabel#fieldLabel, QLabel#statName { color: @muted; font-size: 10px; }
+        QLabel#statValue { font-size: 16px; font-weight: 500; }
+        QLabel#subtitleLabel, QLabel#urlSummary, QLabel#emptyHint, QLabel#helperText { color: @secondary; font-size: 11px; }
+        QLabel#urlSummary { font-family: "Consolas"; color: @muted; font-size: 10px; }
+        QLabel#detailsMetadata { color: @muted; background: transparent; border: none; padding: 2px 0; font-family: "Consolas"; font-size: 10px; }
+        QLabel#connectionSummary { color: @muted; font-size: 10px; }
+        QLabel#eyebrow { color: @muted; font-size: 10px; font-weight: 600; }
+        QLabel#statusPill { border: 1px solid @line; border-radius: 5px; padding: 3px 8px; font-size: 10px; background: transparent; color: @secondary; }
         QLabel#statusPill[mode="running"], QLabel#statusPill[state="running"], QLabel#statusPill[state="success"] { background: @accentSoft; color: @accent; border-color: @accentLine; }
         QLabel#statusPill[state="error"] { background: @redSoft; color: @red; border-color: @redSoft; }
-        QLabel#validationLabel { font-size: 11px; }
+        QLabel#validationLabel { font-size: 10px; }
         QLabel#validationLabel[state="valid"] { color: @accent; }
         QLabel#validationLabel[state="invalid"] { color: @red; }
         QLabel#overviewTitle { font-size: 33px; font-weight: 500; }
         QLabel#overviewMetricValue { color: @text; font-size: 23px; font-weight: 500; }
-        QLabel#overviewMetricLabel { color: @muted; font-size: 11px; }
-        QLabel#workspaceHomeCaption { color: @muted; font-size: 11px; }
-        QLabel#emptyTitle, QLabel#logEmptyTitle { font-size: 16px; font-weight: 500; }
-        QLabel#countBadge { background: @raised; color: @secondary; padding: 1px 6px; border-radius: 4px; font-size: 11px; }
-        QLabel#statusText, QLabel#savedStatus { color: @muted; font-size: 11px; }
+        QLabel#overviewMetricLabel { color: @muted; font-size: 10px; }
+        QLabel#workspaceHomeCaption { color: @muted; font-size: 10px; }
+        QLabel#emptyTitle, QLabel#logEmptyTitle { font-size: 15px; font-weight: 500; }
+        QLabel#countBadge { background: @raised; color: @secondary; padding: 1px 6px; border-radius: 4px; font-size: 10px; }
+        QLabel#statusText, QLabel#savedStatus { color: @muted; font-size: 10px; }
         QLabel#savedStatus { color: @secondary; }
         QWidget#logEmptyState { background: @bg; }
         QWidget#logToolbar { background: @panel; border-bottom: 1px solid @lineSoft; }
@@ -287,9 +287,9 @@ QString styleSheet()
         QLineEdit:hover:enabled, QSpinBox:hover:enabled, QComboBox:hover:enabled { border-color: @muted; }
         QLineEdit:focus, QSpinBox:focus, QComboBox:focus, QPlainTextEdit:focus, QTextEdit:focus { border: 1px solid @accentLine; }
         QLineEdit:disabled, QSpinBox:disabled, QComboBox:disabled { color: @secondary; background: @bg; border: 1px dashed @line; }
-        QLineEdit#sidebarSearch { background: @input; padding: 6px 8px; font-size: 12px; }
-        QLineEdit#bodySearch { min-height: 15px; padding: 4px 8px; font-size: 11px; }
-        QPlainTextEdit#codeEditor, QPlainTextEdit#detailsEditor { font-family: "Consolas"; font-size: 12px; background: @input; }
+        QLineEdit#sidebarSearch { background: @input; padding: 6px 8px; font-size: 11px; }
+        QLineEdit#bodySearch { min-height: 15px; padding: 4px 8px; font-size: 10px; }
+        QPlainTextEdit#codeEditor, QPlainTextEdit#detailsEditor { font-family: "Consolas"; font-size: 11px; background: @input; }
         QFrame#requestEditorCard QPlainTextEdit#codeEditor, QFrame#logDetailsCard QPlainTextEdit#codeEditor { background: @bg; border: none; border-radius: 0; padding: 0; }
         QFrame#requestAddressBar { background: @input; border: 1px solid @line; border-radius: 7px; }
         QComboBox#requestProtocol, QComboBox#httpMethod, QLineEdit#requestTarget, QLineEdit#transportAddress { background: transparent; border: none; border-radius: 0; padding: 5px 8px; min-height: 22px; }
@@ -313,13 +313,13 @@ QString styleSheet()
         QSpinBox::up-arrow { image: url(@spinUpIcon); width: 10px; height: 6px; }
         QSpinBox::down-arrow { image: url(@spinDownIcon); width: 10px; height: 6px; }
         QSpinBox::up-arrow:disabled, QSpinBox::down-arrow:disabled { image: none; }
-        QCheckBox { color: @secondary; spacing: 7px; font-size: 12px; background: transparent; }
+        QCheckBox { color: @secondary; spacing: 7px; font-size: 11px; background: transparent; }
         QCheckBox:disabled { color: @muted; }
         QCheckBox::indicator, QTableView::indicator { width: 14px; height: 14px; background: @input; border: 1px solid @muted; border-radius: 3px; }
         QCheckBox::indicator:hover, QTableView::indicator:hover { border-color: @accent; }
         QCheckBox::indicator:checked, QTableView::indicator:checked { image: url(@checkIcon); background: @accent; border-color: @accent; }
         QCheckBox::indicator:disabled, QTableView::indicator:disabled { border-color: @line; }
-        QPushButton, QToolButton { color: @secondary; background: @panel; border: 1px solid @line; border-radius: 6px; padding: 6px 11px; font-size: 12px; }
+        QPushButton, QToolButton { color: @secondary; background: @panel; border: 1px solid @line; border-radius: 6px; padding: 6px 11px; font-size: 11px; }
         QPushButton { min-height: 18px; }
         QPushButton:hover, QToolButton:hover { color: @text; background: @raised; border-color: @muted; }
         QPushButton:pressed, QToolButton:pressed { background: @accentSoft; border-color: @accentLine; }
@@ -338,15 +338,15 @@ QString styleSheet()
         QPushButton#dangerButton:disabled { color: @muted; background: @panel; border-color: @line; }
     )");
     sheet += QStringLiteral(R"(
-        QPushButton#compactButton { min-height: 17px; padding: 4px 8px; font-size: 11px; }
-        QPushButton#languageButton { min-height: 17px; padding: 4px 18px 4px 8px; font-size: 11px; }
-        QPushButton#breadcrumbButton { color: @secondary; background: transparent; border: 1px solid transparent; padding: 5px 4px; font-size: 11px; }
+        QPushButton#compactButton { min-height: 17px; padding: 4px 8px; font-size: 10px; }
+        QPushButton#languageButton { min-height: 17px; padding: 4px 18px 4px 8px; font-size: 10px; }
+        QPushButton#breadcrumbButton { color: @secondary; background: transparent; border: 1px solid transparent; padding: 5px 4px; font-size: 10px; }
         QPushButton#breadcrumbButton:hover { color: @text; background: @raised; }
         QPushButton#breadcrumbButton:focus { border-color: @accentLine; }
         QWidget#sidebar QPushButton#compactButton { background: transparent; border-color: transparent; }
         QWidget#sidebar QPushButton#compactButton:hover { color: @text; background: @raised; }
         QWidget#sidebar QPushButton#compactButton:focus { border-color: @accentLine; }
-        QPushButton#workspaceHomeButton { color: @text; background: transparent; border: 1px solid transparent; text-align: left; font-size: 15px; font-weight: 600; padding: 9px 10px; }
+        QPushButton#workspaceHomeButton { color: @text; background: transparent; border: 1px solid transparent; text-align: left; font-size: 14px; font-weight: 600; padding: 9px 10px; }
         QPushButton#workspaceHomeButton:hover { background: @raised; }
         QPushButton#workspaceHomeButton:checked { background: @accentSoft; border-color: @accentLine; }
         QToolButton#editNameButton, QPushButton#toolbarButton, QToolButton#toolbarButton, QPushButton#themeButton, QToolButton#themeButton { background: transparent; border: 1px solid transparent; padding: 5px; }
@@ -366,20 +366,22 @@ QString styleSheet()
         QListWidget#collectionRequests::item:selected { color: @text; background: @accentSoft; }
         QTableView { color: @secondary; background: @bg; alternate-background-color: @panel; border: none; gridline-color: @lineSoft; selection-background-color: @accentSoft; selection-color: @text; outline: none; }
         QTableView::item { padding: 6px 8px; border-bottom: 1px solid @lineSoft; }
+        QTableView#logTable { font-size: 11px; }
+        QTableView#logTable QHeaderView::section { font-size: 9px; padding: 8px; }
         QTableView::item:hover { background: @raised; }
         QTableView::item:selected { background: @accentSoft; }
         QHeaderView { background: @bg; }
-        QHeaderView::section { color: @muted; background: @bg; border: none; border-bottom: 1px solid @lineSoft; padding: 7px 8px; font-size: 11px; font-weight: 500; }
+        QHeaderView::section { color: @muted; background: @bg; border: none; border-bottom: 1px solid @lineSoft; padding: 7px 8px; font-size: 10px; font-weight: 500; }
         QTableWidget#httpHeadersTable { border: 1px solid @lineSoft; border-radius: 5px; }
         QTableWidget#httpHeadersTable QLineEdit { border: none; border-radius: 0; padding: 2px 6px; }
         QTableCornerButton::section { background: @panel; border: none; }
         QTabWidget::pane { border: none; background: @bg; }
         QTabWidget#workspaceTabs::pane { top: -1px; }
-        QTabBar::tab { color: @secondary; background: transparent; border: none; border-bottom: 2px solid transparent; padding: 8px 13px; font-size: 12px; }
+        QTabBar::tab { color: @secondary; background: transparent; border: none; border-bottom: 2px solid transparent; padding: 8px 13px; font-size: 11px; }
         QTabBar::tab:hover { color: @text; background: @raised; }
         QTabBar::tab:selected { color: @text; border-bottom-color: @accent; }
         QTabBar#workspaceTabBar { background: @sidebar; }
-        QTabBar#workspaceTabBar::tab { background: @sidebar; border-right: 1px solid @lineSoft; border-bottom: 2px solid @lineSoft; padding: 9px 12px; min-width: 100px; font-size: 11px; }
+        QTabBar#workspaceTabBar::tab { background: @sidebar; border-right: 1px solid @lineSoft; border-bottom: 2px solid @lineSoft; padding: 9px 12px; min-width: 100px; font-size: 10px; }
         QTabBar#workspaceTabBar::tab:hover { background: @panel; }
         QTabBar#workspaceTabBar::tab:selected { background: @bg; border-bottom-color: @accent; }
         QTabBar#workspaceTabBar::close-button { margin-right: 3px; }
@@ -390,11 +392,11 @@ QString styleSheet()
         QTabWidget#detailsTabs::pane { border-top: 1px solid @line; }
         QTabWidget#innerDetailsTabs::pane { border-top: 1px solid @lineSoft; }
         QTabBar#detailsTabBar::tab { padding: 7px 12px; }
-        QTabBar#innerDetailsTabBar::tab { padding: 6px 12px; font-size: 11px; }
+        QTabBar#innerDetailsTabBar::tab { padding: 6px 12px; font-size: 10px; }
         QTabWidget#editorTabs::pane { border-top: 1px solid @line; }
         QTabBar#editorTabs::tab { padding: 7px 15px; }
         QTabBar#bodyViewMode { background: @panel; border: none; border-radius: 5px; }
-        QTabBar#bodyViewMode::tab { color: @muted; background: transparent; border: none; border-radius: 3px; margin: 2px; padding: 4px 9px; font-size: 11px; }
+        QTabBar#bodyViewMode::tab { color: @muted; background: transparent; border: none; border-radius: 3px; margin: 2px; padding: 4px 9px; font-size: 10px; }
         QTabBar#bodyViewMode::tab:hover { color: @text; background: @raised; }
         QTabBar#bodyViewMode::tab:selected { color: @text; background: @raised; border: none; }
         QScrollBar:vertical { background: transparent; width: 10px; margin: 2px; }
@@ -407,9 +409,9 @@ QString styleSheet()
         QScrollBar::add-page, QScrollBar::sub-page { background: none; }
         QSplitter::handle { background: @lineSoft; border: none; }
         QSplitter::handle:hover { background: @accentLine; }
-        QStatusBar { color: @muted; background: @sidebar; border-top: 1px solid @lineSoft; font-size: 11px; }
+        QStatusBar { color: @muted; background: @sidebar; border-top: 1px solid @lineSoft; font-size: 10px; }
         QStatusBar::item { border: none; }
-        QStatusBar QLabel { color: @muted; font-size: 11px; }
+        QStatusBar QLabel { color: @muted; font-size: 10px; }
         QMenu { color: @secondary; background: @panel; border: 1px solid @line; padding: 5px; border-radius: 6px; }
         QMenu::item { padding: 7px 22px 7px 11px; border-radius: 4px; }
         QMenu::item:selected { color: @text; background: @raised; }
@@ -449,7 +451,7 @@ void apply(Theme theme)
         QApplication::setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
         qApp->setProperty("multiSenderFusionStyle", true);
         QFont font(interfaceFontFamily());
-        font.setPixelSize(13);
+        font.setPixelSize(12);
         font.setWeight(QFont::Normal);
         font.setStyleStrategy(QFont::PreferAntialias);
         font.setHintingPreference(QFont::PreferNoHinting);

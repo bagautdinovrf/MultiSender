@@ -78,6 +78,14 @@ public:
         initStyleOption(&opt, index);
         opt.state &= ~QStyle::State_HasFocus;
         opt.font.setWeight(QFont::Normal);
+        opt.font.setPixelSize(11);
+        if (index.column() == RequestLogModel::TimeColumn
+            || index.column() == RequestLogModel::DurationColumn
+            || index.column() == RequestLogModel::UrlColumn) {
+            opt.font.setFamily(QStringLiteral("Consolas"));
+            opt.font.setPixelSize(10);
+        }
+        opt.fontMetrics = QFontMetrics(opt.font);
         if (index.column() == RequestLogModel::TimeColumn || index.column() == RequestLogModel::UrlColumn)
             opt.direction = Qt::LeftToRight;
         const bool custom = index.column() == RequestLogModel::RequestColumn
@@ -117,13 +125,13 @@ public:
                 }
             }
             QFont badgeFont = option.font;
-            badgeFont.setWeight(QFont::DemiBold);
-            badgeFont.setPointSizeF(qMax(7.0, badgeFont.pointSizeF() - 1));
+            badgeFont.setWeight(QFont::Medium);
+            badgeFont.setPixelSize(9);
             const QFontMetrics fm(badgeFont);
             const int badgeWidth = index.column() == RequestLogModel::RequestColumn
                 ? qMax(51, fm.horizontalAdvance(badge) + 14)
                 : qMin(option.rect.width() - 14, fm.horizontalAdvance(badge) + 16);
-            const int badgeHeight = qMin(23, option.rect.height() - 8);
+            const int badgeHeight = qMin(20, option.rect.height() - 16);
             const QRect badgeRect = QStyle::visualRect(option.direction, option.rect,
                 QRect(option.rect.left() + 7, option.rect.center().y() - badgeHeight / 2, badgeWidth, badgeHeight));
             QColor background = foreground;
@@ -475,16 +483,22 @@ LogPane::LogPane(RequestLogModel *model, const QByteArray &splitterState, bool a
     m_view->setWordWrap(false);
     m_view->setFrameShape(QFrame::NoFrame);
     m_view->verticalHeader()->hide();
-    m_view->verticalHeader()->setDefaultSectionSize(35);
+    m_view->verticalHeader()->setSectionResizeMode(QHeaderView::Fixed);
+    m_view->verticalHeader()->setDefaultSectionSize(40);
     m_view->horizontalHeader()->setHighlightSections(false);
     m_view->horizontalHeader()->setDefaultAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-    m_view->horizontalHeader()->setStretchLastSection(true);
+    // Keep the outcome beside the timestamp; identifiers stay hidden.
+    auto *journalHeader = m_view->horizontalHeader();
+    journalHeader->moveSection(journalHeader->visualIndex(RequestLogModel::StatusColumn), 1);
+    journalHeader->moveSection(journalHeader->visualIndex(RequestLogModel::DurationColumn),
+                               RequestLogModel::ColumnCount - 1);
+    journalHeader->setStretchLastSection(false);
     m_view->horizontalHeader()->setSectionResizeMode(RequestLogModel::UrlColumn, QHeaderView::Stretch);
-    m_view->setColumnWidth(RequestLogModel::TimeColumn, 104);
+    m_view->setColumnWidth(RequestLogModel::TimeColumn, 120);
     m_view->setColumnHidden(RequestLogModel::IdColumn, true);
     m_view->setColumnHidden(RequestLogModel::MethodColumn, true);
     m_view->setColumnWidth(RequestLogModel::RequestColumn, 210);
-    m_view->setColumnWidth(RequestLogModel::StatusColumn, 114);
+    m_view->setColumnWidth(RequestLogModel::StatusColumn, 125);
     m_view->setColumnWidth(RequestLogModel::DurationColumn, qMax(88,
         fontMetrics().horizontalAdvance(m_model->headerData(RequestLogModel::DurationColumn, Qt::Horizontal).toString()) + 24));
     m_tableStack->addWidget(m_view);

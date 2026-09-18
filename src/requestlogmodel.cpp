@@ -90,7 +90,7 @@ QVariant RequestLogModel::data(const QModelIndex &index, int role) const
     }
 
     if (role == Qt::TextAlignmentRole) {
-        if (index.column() == IdColumn || index.column() == MethodColumn
+        if (index.column() == TimeColumn || index.column() == IdColumn || index.column() == MethodColumn
             || index.column() == DurationColumn) {
             return Qt::AlignCenter;
         }
@@ -109,6 +109,10 @@ QVariant RequestLogModel::data(const QModelIndex &index, int role) const
 
 QVariant RequestLogModel::headerData(int section, Qt::Orientation orientation, int role) const
 {
+    if (orientation == Qt::Horizontal && role == Qt::TextAlignmentRole
+        && (section == TimeColumn || section == DurationColumn)) {
+        return Qt::AlignCenter;
+    }
     if (orientation != Qt::Horizontal || role != Qt::DisplayRole) {
         return {};
     }

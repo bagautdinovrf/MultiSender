@@ -65,7 +65,7 @@ void CollectionRequestDelegate::paint(QPainter *painter, const QStyleOptionViewI
     painter->drawText(badge, Qt::AlignCenter, operation);
 
     QFont statusFont = item.font;
-    statusFont.setPixelSize(11);
+    statusFont.setPixelSize(10);
     statusFont.setWeight(QFont::Normal);
     const QString status = busy ? UiLanguage::text("Работает") : UiLanguage::text("Остановлен");
     const int statusTextWidth = QFontMetrics(statusFont).horizontalAdvance(status);
@@ -90,7 +90,7 @@ void CollectionRequestDelegate::paint(QPainter *painter, const QStyleOptionViewI
     const Qt::Alignment alignment = Qt::AlignVCenter | Qt::AlignAbsolute
         | (item.direction == Qt::RightToLeft ? Qt::AlignRight : Qt::AlignLeft);
     QFont nameFont = item.font;
-    nameFont.setPixelSize(13);
+    nameFont.setPixelSize(12);
     nameFont.setWeight(QFont::Medium);
     painter->setFont(nameFont);
     painter->setPen(AppTheme::color(u"text"));
@@ -98,7 +98,7 @@ void CollectionRequestDelegate::paint(QPainter *painter, const QStyleOptionViewI
     painter->drawText(nameRect, alignment, QFontMetrics(nameFont).elidedText(name, Qt::ElideRight, textWidth));
 
     QFont endpointFont = item.font;
-    endpointFont.setPixelSize(11);
+    endpointFont.setPixelSize(10);
     endpointFont.setWeight(QFont::Normal);
     painter->setFont(endpointFont);
     painter->setPen(AppTheme::color(u"muted"));
