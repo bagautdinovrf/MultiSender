@@ -105,7 +105,7 @@ public:
         opt.state &= ~QStyle::State_HasFocus;
         opt.font.setWeight(QFont::Normal);
         if (index.column() == RequestLogModel::RequestColumn)
-            opt.font.setWeight(QFont::Medium);
+            opt.font.setWeight(static_cast<QFont::Weight>(550));
         opt.font.setPixelSize(11);
         if (index.column() == RequestLogModel::TimeColumn
             || index.column() == RequestLogModel::DurationColumn
