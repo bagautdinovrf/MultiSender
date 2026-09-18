@@ -138,8 +138,8 @@ public:
         painter->setBrush(fill);
         painter->drawRoundedRect(badge, 4, 4);
         QFont badgeFont = item.font;
-        badgeFont.setPointSizeF(8.0);
-        badgeFont.setBold(true);
+        badgeFont.setPixelSize(10);
+        badgeFont.setWeight(QFont::DemiBold);
         painter->setFont(badgeFont);
         painter->setPen(foreground);
         painter->drawText(badge, Qt::AlignCenter, operation);
@@ -170,8 +170,8 @@ private:
     static int badgeWidth(const QStyleOptionViewItem &option)
     {
         QFont font = option.font;
-        font.setPointSizeF(8.0);
-        font.setBold(true);
+        font.setPixelSize(10);
+        font.setWeight(QFont::DemiBold);
         return QFontMetrics(font).horizontalAdvance(QStringLiteral("OPTIONS")) + 10;
     }
 

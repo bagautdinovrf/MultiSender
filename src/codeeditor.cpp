@@ -43,8 +43,11 @@ CodeEditor::CodeEditor(QWidget *parent)
 {
     setObjectName(QStringLiteral("codeEditor"));
     setLayoutDirection(Qt::LeftToRight);
-    QFont codeFont(QStringLiteral("Consolas"), 10);
+    QFont codeFont(QStringLiteral("Consolas"));
+    codeFont.setPixelSize(12);
     codeFont.setStyleHint(QFont::Monospace);
+    codeFont.setStyleStrategy(QFont::PreferAntialias);
+    codeFont.setHintingPreference(QFont::PreferNoHinting);
     codeFont.setFixedPitch(true);
     setFont(codeFont);
     setTabStopDistance(fontMetrics().horizontalAdvance(u' ') * 2);

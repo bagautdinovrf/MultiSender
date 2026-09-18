@@ -45,11 +45,11 @@ void CollectionRequestDelegate::paint(QPainter *painter, const QStyleOptionViewI
     const QRect badge = visualRect(QRect(content.left(), content.center().y() - 10, 48, 20));
 
     QFont badgeFont = item.font;
-    badgeFont.setPointSizeF(8.0);
-    badgeFont.setWeight(QFont::Bold);
+    badgeFont.setPixelSize(10);
+    badgeFont.setWeight(QFont::DemiBold);
     const int operationWidth = QFontMetrics(badgeFont).horizontalAdvance(operation);
     if (operationWidth > badge.width() - 4)
-        badgeFont.setPointSizeF(badgeFont.pointSizeF() * (badge.width() - 4) / operationWidth);
+        badgeFont.setPixelSize(qMax(1, badgeFont.pixelSize() * (badge.width() - 4) / operationWidth));
 
     painter->save();
     painter->setClipRect(item.rect);
@@ -65,7 +65,7 @@ void CollectionRequestDelegate::paint(QPainter *painter, const QStyleOptionViewI
     painter->drawText(badge, Qt::AlignCenter, operation);
 
     QFont statusFont = item.font;
-    statusFont.setPointSizeF(8.5);
+    statusFont.setPixelSize(11);
     statusFont.setWeight(QFont::Normal);
     const QString status = busy ? UiLanguage::text("Работает") : UiLanguage::text("Остановлен");
     const int statusTextWidth = QFontMetrics(statusFont).horizontalAdvance(status);
@@ -90,7 +90,7 @@ void CollectionRequestDelegate::paint(QPainter *painter, const QStyleOptionViewI
     const Qt::Alignment alignment = Qt::AlignVCenter | Qt::AlignAbsolute
         | (item.direction == Qt::RightToLeft ? Qt::AlignRight : Qt::AlignLeft);
     QFont nameFont = item.font;
-    nameFont.setPointSizeF(10.0);
+    nameFont.setPixelSize(13);
     nameFont.setWeight(QFont::Medium);
     painter->setFont(nameFont);
     painter->setPen(AppTheme::color(u"text"));
@@ -98,7 +98,7 @@ void CollectionRequestDelegate::paint(QPainter *painter, const QStyleOptionViewI
     painter->drawText(nameRect, alignment, QFontMetrics(nameFont).elidedText(name, Qt::ElideRight, textWidth));
 
     QFont endpointFont = item.font;
-    endpointFont.setPointSizeF(8.5);
+    endpointFont.setPixelSize(11);
     endpointFont.setWeight(QFont::Normal);
     painter->setFont(endpointFont);
     painter->setPen(AppTheme::color(u"muted"));
