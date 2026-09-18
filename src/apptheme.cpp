@@ -11,6 +11,7 @@
 #include <QPolygonF>
 #include <QStyleFactory>
 #include <QStyleHints>
+#include <QTabBar>
 #include <QVariant>
 #include <QWidget>
 
@@ -114,11 +115,14 @@ public:
             p->drawRoundedRect(QRectF(6, 6, 12, 12), 2, 2);
         } else if (m_name == QLatin1String("plus")) {
             line(5, 12, 19, 12); line(12, 5, 12, 19);
-        } else if (m_name == QLatin1String("folder")) {
+        } else if (m_name == QLatin1String("folder") || m_name == QLatin1String("folder-plus")) {
             QPainterPath path;
             path.moveTo(3, 7); path.lineTo(3, 19); path.lineTo(21, 19);
             path.lineTo(21, 7); path.lineTo(11, 7); path.lineTo(9, 4);
             path.lineTo(3, 4); path.closeSubpath(); p->drawPath(path);
+            if (m_name == QLatin1String("folder-plus")) {
+                line(9, 13, 15, 13); line(12, 10, 12, 16);
+            }
         } else if (m_name == QLatin1String("search")) {
             p->drawEllipse(QPointF(10.5, 10.5), 6.5, 6.5); line(15.5, 15.5, 21, 21);
         } else if (m_name == QLatin1String("copy")) {
@@ -161,6 +165,17 @@ public:
             p->drawEllipse(QPointF(8, 6), 2, 2);
             p->drawEllipse(QPointF(16, 12), 2, 2);
             p->drawEllipse(QPointF(10, 18), 2, 2);
+        } else if (m_name == QLatin1String("headers")) {
+            p->drawRoundedRect(QRectF(3, 4, 18, 16), 2, 2);
+            line(3, 9, 21, 9); line(10, 9, 10, 20);
+            line(3, 14, 21, 14);
+        } else if (m_name == QLatin1String("database")) {
+            p->drawEllipse(QRectF(4, 3, 16, 6));
+            line(4, 6, 4, 18); line(20, 6, 20, 18);
+            p->drawArc(QRectF(4, 9, 16, 6), 180 * 16, 180 * 16);
+            p->drawArc(QRectF(4, 15, 16, 6), 180 * 16, 180 * 16);
+        } else if (m_name == QLatin1String("external")) {
+            poly({{7, 17}, {18, 6}, {10, 6}}); line(18, 6, 18, 14);
         } else if (m_name == QLatin1String("keyboard")) {
             p->drawRoundedRect(QRectF(2, 5, 20, 14), 2, 2);
             for (int y : {9, 12}) for (int x : {6, 10, 14, 18}) line(x, y, x + .2, y);
@@ -293,7 +308,7 @@ QString styleSheet()
         QFrame#requestEditorCard QPlainTextEdit#codeEditor, QFrame#logDetailsCard QPlainTextEdit#codeEditor { background: @bg; border: none; border-radius: 0; padding: 0; }
         QFrame#requestAddressBar { background: @input; border: 1px solid @line; border-radius: 7px; }
         QComboBox#requestProtocol, QComboBox#httpMethod, QLineEdit#requestTarget, QLineEdit#transportAddress { background: transparent; border: none; border-radius: 0; padding: 5px 8px; min-height: 22px; }
-        QComboBox#requestProtocol, QComboBox#httpMethod { border-right: 1px solid @lineSoft; padding-right: 20px; font-weight: 600; }
+        QComboBox#requestProtocol, QComboBox#httpMethod { border-right: 1px solid @lineSoft; padding-right: 20px; font-size: 10px; font-weight: 500; }
         QComboBox#httpMethod { color: @accent; font-family: "Consolas"; }
         QComboBox#httpMethod[method="POST"], QComboBox#httpMethod[method="PUT"] { color: @orange; }
         QComboBox#httpMethod[method="PATCH"] { color: @blue; }
@@ -325,9 +340,14 @@ QString styleSheet()
         QPushButton:pressed, QToolButton:pressed { background: @accentSoft; border-color: @accentLine; }
         QPushButton:focus, QToolButton:focus { border-color: @accentLine; }
         QPushButton:disabled, QToolButton:disabled { color: @muted; background: @panel; border-color: @lineSoft; }
-        QPushButton#sendButton { color: @onAccent; background: @accent; border-color: @accent; font-weight: 600; padding: 5px 14px; }
+        QPushButton#sendButton { color: @onAccent; background: @accent; border-color: @accent; font-size: 12px; font-weight: 600; padding: 5px 17px; }
         QPushButton#sendButton:hover:enabled { background: @accentHover; border-color: @accentHover; }
         QPushButton#sendButton:disabled { color: @muted; background: @raised; border-color: @line; }
+        QPushButton#dataDirectoryButton { background: transparent; border: 1px solid transparent; padding: 0; text-align: left; }
+        QPushButton#dataDirectoryButton:hover { background: @panel; border-color: @lineSoft; }
+        QLabel#dataDirectoryTitle { color: @secondary; font-size: 10px; font-weight: 600; }
+        QLabel#dataDirectoryHint { color: @muted; font-size: 9px; }
+        QTreeWidget { font-size: 11px; }
         QPushButton#primaryButton { color: @secondary; background: transparent; border-color: @line; }
         QPushButton#primaryButton:hover:enabled { color: @accent; background: @accentSoft; border-color: @accentLine; }
         QPushButton#primaryButton[running="true"] { color: @red; background: @redSoft; border-color: @redSoft; }
@@ -339,6 +359,8 @@ QString styleSheet()
     )");
     sheet += QStringLiteral(R"(
         QPushButton#compactButton { min-height: 17px; padding: 4px 8px; font-size: 10px; }
+        QPushButton#transferButton { min-height: 22px; padding: 5px 10px; font-size: 10px; background: @panel; border: 1px solid @line; }
+        QPushButton#transferButton:hover { background: @raised; border-color: @accentLine; }
         QPushButton#languageButton { min-height: 17px; padding: 4px 18px 4px 8px; font-size: 10px; }
         QPushButton#breadcrumbButton { color: @secondary; background: transparent; border: 1px solid transparent; padding: 5px 4px; font-size: 10px; }
         QPushButton#breadcrumbButton:hover { color: @text; background: @raised; }
@@ -407,7 +429,7 @@ QString styleSheet()
         QScrollBar::handle:hover { background: @muted; }
         QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; border: none; }
         QScrollBar::add-page, QScrollBar::sub-page { background: none; }
-        QSplitter::handle { background: @lineSoft; border: none; }
+        QSplitter::handle { background: transparent; border: none; }
         QSplitter::handle:hover { background: @accentLine; }
         QStatusBar { color: @muted; background: @sidebar; border-top: 1px solid @lineSoft; font-size: 10px; }
         QStatusBar::item { border: none; }
@@ -485,6 +507,11 @@ void apply(Theme theme)
     qApp->setPalette(palette);
     qApp->setStyleSheet(styleSheet());
     for (QWidget *widget : QApplication::allWidgets()) {
+        if (auto *tabs = qobject_cast<QTabBar *>(widget)) {
+            const auto names = tabs->property("tabIconNames").toStringList();
+            for (int index = 0; index < qMin(tabs->count(), names.size()); ++index)
+                tabs->setTabIcon(index, icon(names.at(index)));
+        }
         if (auto *button = qobject_cast<QAbstractButton *>(widget)) {
             const QString name = button->property("iconName").toString();
             if (!name.isEmpty()) {

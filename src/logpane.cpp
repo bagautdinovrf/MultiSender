@@ -86,6 +86,13 @@ public:
             opt.font.setPixelSize(10);
         }
         opt.fontMetrics = QFontMetrics(opt.font);
+        if (index.column() == RequestLogModel::IdColumn) {
+            opt.font.setFamily(QStringLiteral("Consolas"));
+            opt.font.setPixelSize(9);
+            opt.fontMetrics = QFontMetrics(opt.font);
+            opt.palette.setColor(QPalette::Text, AppTheme::color(u"muted"));
+            opt.palette.setColor(QPalette::HighlightedText, AppTheme::color(u"secondary"));
+        }
         if (index.column() == RequestLogModel::TimeColumn || index.column() == RequestLogModel::UrlColumn)
             opt.direction = Qt::LeftToRight;
         const bool custom = index.column() == RequestLogModel::RequestColumn
@@ -492,10 +499,11 @@ LogPane::LogPane(RequestLogModel *model, const QByteArray &splitterState, bool a
     journalHeader->moveSection(journalHeader->visualIndex(RequestLogModel::StatusColumn), 1);
     journalHeader->moveSection(journalHeader->visualIndex(RequestLogModel::DurationColumn),
                                RequestLogModel::ColumnCount - 1);
+    journalHeader->moveSection(journalHeader->visualIndex(RequestLogModel::IdColumn), 0);
     journalHeader->setStretchLastSection(false);
     m_view->horizontalHeader()->setSectionResizeMode(RequestLogModel::UrlColumn, QHeaderView::Stretch);
     m_view->setColumnWidth(RequestLogModel::TimeColumn, 120);
-    m_view->setColumnHidden(RequestLogModel::IdColumn, true);
+    m_view->setColumnWidth(RequestLogModel::IdColumn, 56);
     m_view->setColumnHidden(RequestLogModel::MethodColumn, true);
     m_view->setColumnWidth(RequestLogModel::RequestColumn, 210);
     m_view->setColumnWidth(RequestLogModel::StatusColumn, 125);
@@ -529,10 +537,13 @@ LogPane::LogPane(RequestLogModel *model, const QByteArray &splitterState, bool a
     m_tabs->setDrawBase(false);
     m_tabs->setUsesScrollButtons(true);
     m_tabs->setElideMode(Qt::ElideNone);
-    m_tabs->addTab(UiLanguage::text("Ответ"));
-    m_tabs->addTab(UiLanguage::text("Заголовки"));
-    m_tabs->addTab(UiLanguage::text("Запрос"));
-    m_tabs->addTab(UiLanguage::text("Заголовки запроса"));
+    m_tabs->setIconSize(QSize(14, 14));
+    m_tabs->setProperty("tabIconNames", QStringList{QStringLiteral("download"), QStringLiteral("headers"),
+                                                  QStringLiteral("upload"), QStringLiteral("headers")});
+    m_tabs->addTab(AppTheme::icon(u"download"), UiLanguage::text("Ответ"));
+    m_tabs->addTab(AppTheme::icon(u"headers"), UiLanguage::text("Заголовки"));
+    m_tabs->addTab(AppTheme::icon(u"upload"), UiLanguage::text("Запрос"));
+    m_tabs->addTab(AppTheme::icon(u"headers"), UiLanguage::text("Заголовки запроса"));
     m_tabs->setTabToolTip(0, UiLanguage::text("Тело ответа"));
     m_tabs->setTabToolTip(1, UiLanguage::text("Заголовки ответа"));
     m_tabs->setTabToolTip(2, UiLanguage::text("Тело запроса"));

@@ -59,7 +59,7 @@ QVariant RequestLogModel::data(const QModelIndex &index, int role) const
         case TimeColumn:
             return entry.sentAt.toString(QStringLiteral("HH:mm:ss.zzz"));
         case IdColumn:
-            return QString::number(entry.id);
+            return QStringLiteral("#%1").arg(entry.id);
         case RequestColumn:
             return entry.requestName;
         case MethodColumn:
@@ -121,7 +121,7 @@ QVariant RequestLogModel::headerData(int section, Qt::Orientation orientation, i
     case TimeColumn:
         return UiLanguage::text("Время");
     case IdColumn:
-        return QStringLiteral("ID");
+        return QStringLiteral("#");
     case RequestColumn:
         return UiLanguage::text("Запрос");
     case MethodColumn:

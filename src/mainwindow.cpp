@@ -78,6 +78,77 @@
 
 namespace {
 
+class ThemeIcon final : public QWidget
+{
+public:
+    ThemeIcon(QString name, QWidget *parent) : QWidget(parent), m_name(std::move(name))
+    {
+        setFixedSize(16, 16);
+        setAttribute(Qt::WA_TransparentForMouseEvents);
+    }
+protected:
+    void paintEvent(QPaintEvent *) override
+    {
+        QPainter painter(this);
+        AppTheme::icon(m_name).paint(&painter, rect());
+    }
+private:
+    QString m_name;
+};
+
+class OperationBadge final : public QWidget
+{
+public:
+    explicit OperationBadge(QWidget *parent) : QWidget(parent)
+    {
+        setAttribute(Qt::WA_TransparentForMouseEvents);
+    }
+    void setOperation(const QString &operation)
+    {
+        m_operation = operation;
+        QFont badgeFont = font();
+        badgeFont.setPixelSize(8);
+        badgeFont.setWeight(QFont::DemiBold);
+        setFont(badgeFont);
+        setFixedSize(qMax(31, QFontMetrics(badgeFont).horizontalAdvance(operation)) + 12, 17);
+        setAccessibleName(operation);
+        update();
+    }
+protected:
+    void paintEvent(QPaintEvent *) override
+    {
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing);
+        const QColor foreground = AppTheme::operationColor(m_operation);
+        QColor background = foreground;
+        background.setAlpha(AppTheme::isDark() ? 28 : 22);
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(background);
+        const QRect badgeRect = isRightToLeft() ? rect().adjusted(0, 0, -4, 0) : rect().adjusted(4, 0, 0, 0);
+        painter.drawRoundedRect(badgeRect, 3, 3);
+        painter.setPen(foreground);
+        QFont badgeFont = font();
+        badgeFont.setPixelSize(8);
+        badgeFont.setWeight(QFont::DemiBold);
+        painter.setFont(badgeFont);
+        painter.drawText(badgeRect, Qt::AlignCenter, m_operation);
+    }
+private:
+    QString m_operation;
+};
+
+void requestTabLabel(QTabWidget *tabs, int index, const QString &operation, const QString &name)
+{
+    auto *badge = static_cast<OperationBadge *>(tabs->tabBar()->tabButton(index, QTabBar::LeftSide));
+    if (!badge) {
+        badge = new OperationBadge(tabs->tabBar());
+        tabs->tabBar()->setTabButton(index, QTabBar::LeftSide, badge);
+    }
+    badge->setOperation(operation);
+    tabs->setTabText(index, name);
+    tabs->setTabToolTip(index, operation + QStringLiteral(" · ") + name);
+}
+
 constexpr int TypeRole = Qt::UserRole;
 constexpr int IdRole = Qt::UserRole + 1;
 constexpr int SplitterHandleWidth = 7;
@@ -114,7 +185,25 @@ public:
     {
         QStyleOptionViewItem item(compactOption(option, index));
         if (!index.parent().isValid()) {
-            QStyledItemDelegate::paint(painter, item, index);
+            initStyleOption(&item, index);
+            const QString count = QString::number(index.model()->rowCount(index));
+            QFont countFont = item.font;
+            countFont.setPixelSize(10);
+            countFont.setWeight(QFont::Normal);
+            const int countWidth = QFontMetrics(countFont).horizontalAdvance(count) + 16;
+            const QRect countRect = QStyle::visualRect(item.direction, item.rect,
+                QRect(item.rect.right() - countWidth + 1, item.rect.top(), countWidth, item.rect.height()));
+            item.font.setWeight(QFont::DemiBold);
+            item.fontMetrics = QFontMetrics(item.font);
+            if (m_tree->isRightToLeft()) item.rect.adjust(countWidth, 0, 0, 0);
+            else item.rect.adjust(0, 0, -countWidth, 0);
+            const QStyle *style = item.widget ? item.widget->style() : QApplication::style();
+            style->drawControl(QStyle::CE_ItemViewItem, &item, painter, item.widget);
+            painter->save();
+            painter->setFont(countFont);
+            painter->setPen(AppTheme::color(u"muted"));
+            painter->drawText(countRect, Qt::AlignCenter, count);
+            painter->restore();
             return;
         }
         initStyleOption(&item, index);
@@ -127,7 +216,9 @@ public:
         const QColor foreground = AppTheme::operationColor(operation);
         QColor fill = foreground;
         fill.setAlpha(AppTheme::isDark() ? 32 : 24);
-        QRect badge = item.rect.adjusted(6, 5, -6, -5);
+        QRect badge = item.rect.adjusted(6, 0, -6, 0);
+        badge.setTop(item.rect.center().y() - 8);
+        badge.setHeight(17);
         const int width = badgeWidth(item);
         if (m_tree->isRightToLeft()) badge.setLeft(badge.right() - width + 1);
         else badge.setWidth(width);
@@ -138,7 +229,7 @@ public:
         painter->setBrush(fill);
         painter->drawRoundedRect(badge, 4, 4);
         QFont badgeFont = item.font;
-        badgeFont.setPixelSize(10);
+        badgeFont.setPixelSize(8);
         badgeFont.setWeight(QFont::DemiBold);
         painter->setFont(badgeFont);
         painter->setPen(foreground);
@@ -170,7 +261,7 @@ private:
     static int badgeWidth(const QStyleOptionViewItem &option)
     {
         QFont font = option.font;
-        font.setPixelSize(10);
+        font.setPixelSize(8);
         font.setWeight(QFont::DemiBold);
         return QFontMetrics(font).horizontalAdvance(QStringLiteral("OPTIONS")) + 10;
     }
@@ -234,7 +325,8 @@ protected:
     void paintEvent(QPaintEvent *) override
     {
         const bool highlighted = isEnabled() && (underMouse() || m_dragging);
-        const int thickness = highlighted ? 5 : 1;
+        if (!highlighted) return;
+        const int thickness = 5;
         QRect line = rect();
         if (orientation() == Qt::Horizontal) {
             line.setLeft((width() - thickness) / 2);
@@ -554,9 +646,11 @@ public:
         m_transportAddress->setAccessibleName(UiLanguage::text("Адрес соединения"));
         m_transportAddress->setToolTip(UiLanguage::text("Адрес и порт задаются на вкладке «Параметры»"));
         addressLayout->addWidget(m_transportAddress, 1);
-        m_send = new QPushButton(UiLanguage::text("Отправить"), editorCard);
+        m_send = new QPushButton(UiLanguage::text("Отправить") + QStringLiteral("    ↵"), editorCard);
         m_send->setObjectName(QStringLiteral("sendButton"));
         m_send->setFixedHeight(42);
+        m_send->setMinimumWidth(160);
+        m_send->setAccessibleName(UiLanguage::text("Отправить"));
         mainRow->addWidget(m_send);
         m_start = new QPushButton(UiLanguage::text("Старт"), editorCard);
         m_start->setObjectName(QStringLiteral("primaryButton"));
@@ -584,9 +678,11 @@ public:
         m_editorTabs->setObjectName(QStringLiteral("editorTabs"));
         m_editorTabs->setExpanding(false);
         m_editorTabs->setDrawBase(false);
-        m_editorTabs->addTab(UiLanguage::text("Тело запроса"));
-        m_editorTabs->addTab(UiLanguage::text("Заголовки"));
-        m_editorTabs->addTab(UiLanguage::text("Параметры"));
+        m_editorTabs->setIconSize(QSize(14, 14));
+        m_editorTabs->setProperty("tabIconNames", QStringList{QStringLiteral("code"), QStringLiteral("headers"), QStringLiteral("settings")});
+        m_editorTabs->addTab(AppTheme::icon(u"code"), UiLanguage::text("Тело запроса"));
+        m_editorTabs->addTab(AppTheme::icon(u"headers"), UiLanguage::text("Заголовки"));
+        m_editorTabs->addTab(AppTheme::icon(u"settings"), UiLanguage::text("Параметры"));
         editorLayout->addWidget(m_editorTabs);
         m_editorPages = new ActivePageStack(editorCard);
         auto *bodyPage = new QWidget(m_editorPages);
@@ -1407,8 +1503,10 @@ public:
         editorTabs->setObjectName(QStringLiteral("editorTabs"));
         editorTabs->setExpanding(false);
         editorTabs->setDrawBase(false);
-        editorTabs->addTab(UiLanguage::text("Запросы"));
-        editorTabs->addTab(UiLanguage::text("Настройки коллекции"));
+        editorTabs->setIconSize(QSize(14, 14));
+        editorTabs->setProperty("tabIconNames", QStringList{QStringLiteral("activity"), QStringLiteral("settings")});
+        editorTabs->addTab(AppTheme::icon(u"activity"), UiLanguage::text("Запросы"));
+        editorTabs->addTab(AppTheme::icon(u"settings"), UiLanguage::text("Настройки коллекции"));
         auto *pages = new ActivePageStack(settingsCard);
         auto *requestsPage = new QWidget(pages);
         auto *requestsLayout = new QVBoxLayout(requestsPage);
@@ -1827,7 +1925,7 @@ void MainWindow::setupUi()
     m_addCollectionButton->setObjectName(QStringLiteral("toolbarButton"));
     m_addCollectionButton->setToolTip(UiLanguage::text("Создать коллекцию"));
     m_addCollectionButton->setAccessibleName(UiLanguage::text("Создать коллекцию"));
-    buttonIcon(m_addCollectionButton, QStringLiteral("folder"));
+    buttonIcon(m_addCollectionButton, QStringLiteral("folder-plus"));
     captionRow->addWidget(m_addCollectionButton);
     m_search = new QLineEdit(sidebar);
     m_search->setObjectName(QStringLiteral("sidebarSearch"));
@@ -1871,20 +1969,40 @@ void MainWindow::setupUi()
     sidebarLayout->addWidget(m_searchEmpty);
     auto *transfers = new QHBoxLayout;
     auto *import = new QPushButton(UiLanguage::text("Импорт"), sidebar);
-    import->setObjectName(QStringLiteral("compactButton"));
+    import->setObjectName(QStringLiteral("transferButton"));
     buttonIcon(import, QStringLiteral("download"));
     connect(import, &QPushButton::clicked, this, &MainWindow::importWorkspace);
     transfers->addWidget(import);
     auto *exportAll = new QPushButton(UiLanguage::text("Экспорт"), sidebar);
-    exportAll->setObjectName(QStringLiteral("compactButton"));
+    exportAll->setObjectName(QStringLiteral("transferButton"));
     buttonIcon(exportAll, QStringLiteral("upload"));
     connect(exportAll, &QPushButton::clicked, this, [this] { exportWorkspace(); });
     transfers->addWidget(exportAll);
     sidebarLayout->addLayout(transfers);
-    auto *dataDirectory = new QPushButton(UiLanguage::text("Данные на этом компьютере"), sidebar);
-    dataDirectory->setObjectName(QStringLiteral("breadcrumbButton"));
+    auto *dataDirectory = new QPushButton(sidebar);
+    dataDirectory->setObjectName(QStringLiteral("dataDirectoryButton"));
+    dataDirectory->setMinimumHeight(68);
+    dataDirectory->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
+    dataDirectory->setAccessibleName(UiLanguage::text("Данные на этом компьютере"));
+    dataDirectory->setCursor(Qt::PointingHandCursor);
+    auto *directoryLayout = new QHBoxLayout(dataDirectory);
+    directoryLayout->setContentsMargins(7, 10, 7, 10);
+    directoryLayout->setSpacing(10);
+    directoryLayout->addWidget(new ThemeIcon(QStringLiteral("database"), dataDirectory));
+    auto *directoryText = new QVBoxLayout;
+    directoryText->setSpacing(4);
+    auto *directoryTitle = new QLabel(UiLanguage::text("Данные на этом компьютере"), dataDirectory);
+    directoryTitle->setObjectName(QStringLiteral("dataDirectoryTitle"));
+    auto *directoryHint = new QLabel(UiLanguage::text("Открыть папку коллекций и истории"), dataDirectory);
+    directoryHint->setObjectName(QStringLiteral("dataDirectoryHint"));
+    for (auto *label : {directoryTitle, directoryHint}) {
+        label->setAttribute(Qt::WA_TransparentForMouseEvents);
+        label->setWordWrap(true);
+        directoryText->addWidget(label);
+    }
+    directoryLayout->addLayout(directoryText, 1);
+    directoryLayout->addWidget(new ThemeIcon(QStringLiteral("external"), dataDirectory));
     dataDirectory->setToolTip(UiLanguage::text("Открыть папку коллекций и истории"));
-    buttonIcon(dataDirectory, QStringLiteral("folder"));
     connect(dataDirectory, &QPushButton::clicked, this, [this] {
         QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(m_workspaceStore.workspacePath()).absolutePath()));
     });
@@ -2421,6 +2539,7 @@ void MainWindow::openRequest(const QUuid &requestId)
     m_requestTabs.insert(requestId, tab);
     const int index = m_tabs->addTab(tab,
         QStringLiteral("%1  %2").arg(requestOperationName(definition->protocol, definition->method), definition->name));
+    requestTabLabel(m_tabs, index, requestOperationName(definition->protocol, definition->method), definition->name);
     addTabCloseButton(tab, index);
     m_tabs->setCurrentIndex(index);
     tab->updateRuntime(runtime->controller->isRunning(), runtime->controller->counters());
@@ -2526,8 +2645,7 @@ void MainWindow::refreshRequestTab(const QUuid &requestId)
     tab->updateRuntime(runtime->controller->isRunning(), runtime->controller->counters());
     const int index = tabIndex(QStringLiteral("request"), requestId);
     if (index >= 0)
-        m_tabs->setTabText(index,
-            QStringLiteral("%1  %2").arg(requestOperationName(definition->protocol, definition->method), definition->name));
+        requestTabLabel(m_tabs, index, requestOperationName(definition->protocol, definition->method), definition->name);
 }
 
 void MainWindow::refreshCollectionTab(const QUuid &collectionId)
@@ -2579,7 +2697,7 @@ void MainWindow::refreshTreeStatuses()
             collectionRunning = collectionRunning || running;
         }
         QFont font = collectionItem->font(0);
-        font.setBold(collectionRunning);
+        font.setWeight(QFont::DemiBold);
         collectionItem->setFont(0, font);
         collectionItem->setForeground(0, collectionRunning
             ? AppTheme::color(u"accent") : AppTheme::color(u"text"));

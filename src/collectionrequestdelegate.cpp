@@ -42,10 +42,10 @@ void CollectionRequestDelegate::paint(QPainter *painter, const QStyleOptionViewI
         return QStyle::visualRect(item.direction, item.rect, rect);
     };
     const QRect content = item.rect.adjusted(10, 0, -12, 0);
-    const QRect badge = visualRect(QRect(content.left(), content.center().y() - 10, 48, 20));
+    const QRect badge = visualRect(QRect(content.left(), content.center().y() - 8, 42, 17));
 
     QFont badgeFont = item.font;
-    badgeFont.setPixelSize(10);
+    badgeFont.setPixelSize(8);
     badgeFont.setWeight(QFont::DemiBold);
     const int operationWidth = QFontMetrics(badgeFont).horizontalAdvance(operation);
     if (operationWidth > badge.width() - 4)
@@ -85,12 +85,12 @@ void CollectionRequestDelegate::paint(QPainter *painter, const QStyleOptionViewI
                           status);
     }
 
-    const int textLeft = content.left() + 60;
+    const int textLeft = content.left() + 54;
     const int textWidth = qMax(0, statusRect.left() - 14 - textLeft);
     const Qt::Alignment alignment = Qt::AlignVCenter | Qt::AlignAbsolute
         | (item.direction == Qt::RightToLeft ? Qt::AlignRight : Qt::AlignLeft);
     QFont nameFont = item.font;
-    nameFont.setPixelSize(12);
+    nameFont.setPixelSize(11);
     nameFont.setWeight(QFont::Medium);
     painter->setFont(nameFont);
     painter->setPen(AppTheme::color(u"text"));
