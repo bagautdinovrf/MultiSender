@@ -1,0 +1,4 @@
+#pragma once
+
+// Generated from the root VERSION file by CMake.
+#define MULTISENDER_VERSION "@PROJECT_VERSION@"
