@@ -14,7 +14,7 @@ bool isDark();
 QColor color(QStringView role);
 QColor operationColor(QStringView operation);
 QIcon icon(QStringView name, QColor overrideColor = {});
-QString styleSheet();
+QIcon icon(QStringView name, QStringView colorRole);
 void apply(Theme theme);
 QString themeName(Theme theme);
 Theme fromName(QStringView name);

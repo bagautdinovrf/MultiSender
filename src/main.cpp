@@ -20,16 +20,12 @@ int main(int argc, char *argv[])
 
     QApplication::setWindowIcon(QIcon(QStringLiteral(":/Installer/MultiSender.ico")));
     application.setQuitOnLastWindowClosed(false);
-    int result = 0;
-    do {
-        const ApplicationSettings settings = SettingsStore().load();
-        if (!UiLanguage::apply(settings.language)) UiLanguage::apply(QStringLiteral("ru"));
-        QApplication::setLayoutDirection(UiLanguage::current() == QStringLiteral("ar")
-                                            ? Qt::RightToLeft : Qt::LeftToRight);
-        AppTheme::apply(AppTheme::fromName(settings.theme));
-        MainWindow window;
-        window.show();
-        result = application.exec();
-    } while (result == UiLanguage::RestartExitCode);
-    return result;
+    const ApplicationSettings settings = SettingsStore().load();
+    if (!UiLanguage::apply(settings.language)) UiLanguage::apply(QStringLiteral("ru"));
+    QApplication::setLayoutDirection(UiLanguage::current() == QStringLiteral("ar")
+                                        ? Qt::RightToLeft : Qt::LeftToRight);
+    AppTheme::apply(AppTheme::fromName(settings.theme));
+    MainWindow window;
+    window.show();
+    return application.exec();
 }

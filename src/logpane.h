@@ -65,7 +65,7 @@ private:
     QStackedWidget *m_pages = nullptr;
     QTabBar *m_tabs = nullptr;
     QLineEdit *m_search = nullptr;
-    QComboBox *m_filter = nullptr;
+    QTabBar *m_filter = nullptr;
     QAction *m_autoScroll = nullptr;
     QPushButton *m_clear = nullptr;
     QToolButton *m_copy = nullptr;

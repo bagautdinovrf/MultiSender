@@ -34,6 +34,9 @@ QColor resultColor(RequestResult result)
 RequestLogModel::RequestLogModel(QObject *parent)
     : QAbstractTableModel(parent)
 {
+    UiLanguage::onChange(this, [this] {
+        emit headerDataChanged(Qt::Horizontal, 0, ColumnCount - 1);
+    });
 }
 
 int RequestLogModel::rowCount(const QModelIndex &parent) const

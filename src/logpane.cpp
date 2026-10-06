@@ -11,6 +11,7 @@
 #include <QAction>
 #include <QApplication>
 #include <QClipboard>
+#include <QCursor>
 #include <QComboBox>
 #include <QEvent>
 #include <QFileDialog>
@@ -26,6 +27,7 @@
 #include <QLineEdit>
 #include <QMenu>
 #include <QMessageBox>
+#include <QMouseEvent>
 #include <QPainter>
 #include <QProgressDialog>
 #include <QPushButton>
@@ -49,6 +51,12 @@
 #include <utility>
 
 namespace {
+
+void copyTextWithFeedback(const QString &text)
+{
+    QApplication::clipboard()->setText(text);
+    QToolTip::showText(QCursor::pos(), UiLanguage::text("Скопировано"));
+}
 
 class JournalSymbol final : public QWidget
 {
@@ -79,14 +87,49 @@ private:
 class JournalView final : public QTableView
 {
 public:
-    using QTableView::QTableView;
+    explicit JournalView(QWidget *parent = nullptr) : QTableView(parent)
+    {
+        setMouseTracking(true);
+    }
+
+    int hoveredRow() const { return m_hoveredRow; }
 
 protected:
+    void mouseMoveEvent(QMouseEvent *event) override
+    {
+        QTableView::mouseMoveEvent(event);
+        const int row = rowAt(event->position().toPoint().y());
+        if (m_hoveredRow != row) {
+            m_hoveredRow = row;
+            viewport()->update();
+        }
+    }
+
+    bool viewportEvent(QEvent *event) override
+    {
+        if (event->type() == QEvent::Leave) {
+            m_hoveredRow = -1;
+            viewport()->update();
+        }
+        return QTableView::viewportEvent(event);
+    }
+
+    void paintEvent(QPaintEvent *event) override
+    {
+        // Re-evaluate after scrolling, filtering or inserting rows under a stationary cursor.
+        m_hoveredRow = viewport()->underMouse()
+            ? rowAt(viewport()->mapFromGlobal(QCursor::pos()).y()) : -1;
+        QTableView::paintEvent(event);
+    }
+
     void resizeEvent(QResizeEvent *event) override
     {
         QTableView::resizeEvent(event);
         setColumnWidth(RequestLogModel::RequestColumn, qBound(185, viewport()->width() * 28 / 100, 330));
     }
+
+private:
+    int m_hoveredRow = -1;
 };
 
 class JournalDelegate final : public QStyledItemDelegate
@@ -103,6 +146,8 @@ public:
         QStyleOptionViewItem opt(option);
         initStyleOption(&opt, index);
         opt.state &= ~QStyle::State_HasFocus;
+        const auto *view = static_cast<const JournalView *>(parent());
+        opt.state.setFlag(QStyle::State_MouseOver, index.row() == view->hoveredRow());
         opt.font.setWeight(QFont::Normal);
         if (index.column() == RequestLogModel::RequestColumn)
             opt.font.setWeight(static_cast<QFont::Weight>(550));
@@ -145,7 +190,7 @@ public:
             } else {
                 switch (entry->result) {
                 case RequestResult::Success:
-                    badge = entry->httpStatus > 0 ? UiLanguage::text("%1 · Успех").arg(entry->httpStatus) : UiLanguage::text("Успешно");
+                    badge = entry->httpStatus > 0 ? QString::number(entry->httpStatus) : UiLanguage::text("Успешно");
                     foreground = AppTheme::color(u"accent");
                     break;
                 case RequestResult::Pending:
@@ -155,7 +200,7 @@ public:
                 case RequestResult::Cancelled:
                     badge = UiLanguage::text("Отменено"); foreground = AppTheme::color(u"muted"); break;
                 default:
-                    badge = entry->httpStatus > 0 ? UiLanguage::text("%1 · Ошибка").arg(entry->httpStatus) : UiLanguage::text("Ошибка");
+                    badge = entry->httpStatus > 0 ? QString::number(entry->httpStatus) : UiLanguage::text("Ошибка");
                     foreground = AppTheme::color(u"red"); break;
                 }
             }
@@ -164,9 +209,10 @@ public:
                                     ? QFont::DemiBold : QFont::Medium);
             badgeFont.setPixelSize(9);
             const QFontMetrics fm(badgeFont);
+            const int badgeTextWidth = fm.horizontalAdvance(badge);
             const int badgeWidth = index.column() == RequestLogModel::RequestColumn
-                ? qMax(51, fm.horizontalAdvance(badge) + 14)
-                : qMin(option.rect.width() - 14, fm.horizontalAdvance(badge) + 16);
+                ? badgeTextWidth + (qMax(51 - badgeTextWidth, 14) + 1) / 2
+                : qMin(option.rect.width() - 14, badgeTextWidth + 32);
             const int badgeHeight = qMin(20, option.rect.height() - 16);
             const QRect badgeRect = QStyle::visualRect(option.direction, option.rect,
                 QRect(option.rect.left() + 7, option.rect.center().y() - badgeHeight / 2, badgeWidth, badgeHeight));
@@ -177,7 +223,21 @@ public:
             painter->drawRoundedRect(badgeRect, 4, 4);
             painter->setPen(foreground);
             painter->setFont(badgeFont);
-            painter->drawText(badgeRect, Qt::AlignCenter, fm.elidedText(badge, Qt::ElideRight, badgeWidth - 8));
+            QRect badgeText = badgeRect;
+            if (index.column() == RequestLogModel::StatusColumn) {
+                const QString symbol = entry->result == RequestResult::Success ? QStringLiteral("check")
+                    : entry->result == RequestResult::Pending ? QStringLiteral("clock")
+                    : entry->result == RequestResult::Skipped || entry->result == RequestResult::Cancelled
+                        ? QStringLiteral("minus") : QStringLiteral("error");
+                const QRect symbolRect = QStyle::visualRect(option.direction, badgeRect,
+                    QRect(badgeRect.left() + 5, badgeRect.center().y() - 5, 10, 10));
+                AppTheme::icon(symbol, foreground).paint(painter, symbolRect);
+                if (option.direction == Qt::RightToLeft) badgeText.adjust(0, 0, -16, 0);
+                else badgeText.adjust(16, 0, 0, 0);
+            }
+            const int textPadding = index.column() == RequestLogModel::RequestColumn ? 4 : 8;
+            painter->drawText(badgeText, Qt::AlignCenter,
+                fm.elidedText(badge, Qt::ElideRight, badgeText.width() - textPadding));
             if (index.column() == RequestLogModel::RequestColumn) {
                 const QRect textRect = QStyle::visualRect(option.direction, option.rect,
                     option.rect.adjusted(badgeWidth + 16, 0, -8, 0));
@@ -248,7 +308,14 @@ QLabel *label(const QString &text, const QString &name, QWidget *parent)
     return result;
 }
 
-QWidget *emptyState(const QString &title, const QString &hint, QWidget *parent,
+QLabel *translatedLabel(const char *source, const QString &name, QWidget *parent)
+{
+    auto *result = label(QString{}, name, parent);
+    UiLanguage::set(result, "text", source);
+    return result;
+}
+
+QWidget *emptyState(const char *title, const char *hint, QWidget *parent,
                     QLabel **titleLabel = nullptr, QLabel **hintLabel = nullptr)
 {
     auto *page = new QWidget(parent);
@@ -256,14 +323,19 @@ QWidget *emptyState(const QString &title, const QString &hint, QWidget *parent,
     auto *layout = new QVBoxLayout(page);
     layout->setContentsMargins(16, 8, 16, 8);
     layout->setSpacing(5);
-    auto *heading = label(title, QStringLiteral("logEmptyTitle"), page);
-    auto *description = label(hint, QStringLiteral("emptyHint"), page);
+    auto *heading = translatedLabel(title, QStringLiteral("logEmptyTitle"), page);
+    auto *description = translatedLabel(hint, QStringLiteral("emptyHint"), page);
     heading->setAlignment(Qt::AlignCenter);
     description->setAlignment(Qt::AlignCenter);
     description->setWordWrap(true);
     layout->addStretch();
+    layout->addWidget(new JournalSymbol(QStringLiteral("terminal"), 38, page), 0, Qt::AlignHCenter);
+    layout->addSpacing(8);
     layout->addWidget(heading);
     layout->addWidget(description);
+    auto *shortcut = label(QStringLiteral("Ctrl + Enter"), QStringLiteral("keycap"), page);
+    UiLanguage::set(shortcut, "toolTip", "Отправить один раз · Ctrl+Enter");
+    layout->addWidget(shortcut, 0, Qt::AlignHCenter);
     layout->addStretch();
     if (titleLabel) *titleLabel = heading;
     if (hintLabel) *hintLabel = description;
@@ -431,10 +503,10 @@ LogPane::LogPane(RequestLogModel *model, const QByteArray &splitterState, bool a
     auto *toolbar = new QWidget(this);
     toolbar->setObjectName(QStringLiteral("journalToolbar"));
     auto *tools = new QHBoxLayout(toolbar);
-    tools->setContentsMargins(10, 6, 10, 6);
+    tools->setContentsMargins(24, 6, 24, 6);
     tools->setSpacing(8);
-    tools->addWidget(new JournalSymbol(QStringLiteral("terminal"), 15, toolbar), 0, Qt::AlignVCenter);
-    tools->addWidget(label(UiLanguage::text("Журнал"), QStringLiteral("sectionTitle"), toolbar), 0, Qt::AlignVCenter);
+    tools->addWidget(label(QStringLiteral(">_"), QStringLiteral("journalPrompt"), toolbar), 0, Qt::AlignVCenter);
+    tools->addWidget(translatedLabel("Журнал", QStringLiteral("sectionTitle"), toolbar), 0, Qt::AlignVCenter);
     m_count = label(QStringLiteral("0"), QStringLiteral("journalCountBadge"), toolbar);
     m_count->setAlignment(Qt::AlignCenter);
     m_count->setFixedHeight(18);
@@ -442,7 +514,7 @@ LogPane::LogPane(RequestLogModel *model, const QByteArray &splitterState, bool a
     tools->addWidget(m_count, 0, Qt::AlignVCenter);
     m_live = label(QStringLiteral("LIVE"), QStringLiteral("statusPill"), toolbar);
     m_live->setProperty("state", QStringLiteral("running"));
-    m_live->setToolTip(UiLanguage::text("Есть незавершённые запросы"));
+    UiLanguage::set(m_live, "toolTip", "Есть незавершённые запросы");
     m_live->hide();
     tools->addWidget(m_live);
     auto *statistics = new QWidget(toolbar);
@@ -459,47 +531,58 @@ LogPane::LogPane(RequestLogModel *model, const QByteArray &splitterState, bool a
     m_meanDuration = label(QStringLiteral("—"), QStringLiteral("fieldLabel"), statistics);
     statisticsLayout->addWidget(m_meanDuration, 0, Qt::AlignVCenter);
     tools->addWidget(statistics, 0, Qt::AlignVCenter);
-    tools->addStretch(1);
     m_search = new QLineEdit(toolbar);
-    m_search->setPlaceholderText(UiLanguage::text("Поиск в журнале"));
-    m_search->setAccessibleName(UiLanguage::text("Поиск в журнале"));
+    UiLanguage::set(m_search, "placeholderText", "Поиск в журнале");
+    UiLanguage::set(m_search, "accessibleName", "Поиск в журнале");
     m_search->setClearButtonEnabled(true);
     m_search->setMinimumWidth(100);
     m_search->setMaximumWidth(180);
     tools->addWidget(m_search);
-    m_filter = new QComboBox(toolbar);
-    m_filter->setAccessibleName(UiLanguage::text("Фильтр результатов"));
-    m_filter->addItem(UiLanguage::text("Все события"), static_cast<int>(LogFilter::All));
-    m_filter->addItem(UiLanguage::text("Успешные"), static_cast<int>(LogFilter::Successful));
-    m_filter->addItem(UiLanguage::text("Ошибки"), static_cast<int>(LogFilter::Errors));
-    m_filter->addItem(UiLanguage::text("Пропущенные"), static_cast<int>(LogFilter::Skipped));
-    m_filter->addItem(UiLanguage::text("Прочие"), static_cast<int>(LogFilter::Other));
+    m_filter = new QTabBar(toolbar);
+    m_filter->setObjectName(QStringLiteral("journalFilters"));
+    UiLanguage::set(m_filter, "accessibleName", "Фильтр результатов");
+    m_filter->setExpanding(false);
+    m_filter->setDrawBase(false);
+    m_filter->setUsesScrollButtons(true);
+    for (const auto &[title, filter] : {std::pair{"Все", LogFilter::All},
+            {"Успешные", LogFilter::Successful},
+            {"Ошибки", LogFilter::Errors},
+            {"Пропущенные", LogFilter::Skipped},
+            {"Прочие", LogFilter::Other}}) {
+        const int index = UiLanguage::addTab(m_filter, title);
+        m_filter->setTabData(index, static_cast<int>(filter));
+        UiLanguage::bind(m_filter, "hint" + QByteArray::number(index), [this, index, title] {
+            m_filter->setTabToolTip(index, UiLanguage::text(title));
+        });
+    }
     tools->addWidget(m_filter);
+    tools->addStretch(1);
     auto *journalMenuButton = new QToolButton(toolbar);
     journalMenuButton->setObjectName(QStringLiteral("toolbarButton"));
     journalMenuButton->setText(QStringLiteral("···"));
-    journalMenuButton->setToolTip(UiLanguage::text("Настройки и экспорт журнала"));
-    journalMenuButton->setAccessibleName(UiLanguage::text("Меню журнала"));
+    UiLanguage::set(journalMenuButton, "toolTip", "Настройки и экспорт журнала");
+    UiLanguage::set(journalMenuButton, "accessibleName", "Меню журнала");
     journalMenuButton->setPopupMode(QToolButton::InstantPopup);
     auto *journalMenu = new QMenu(journalMenuButton);
-    m_autoScroll = journalMenu->addAction(UiLanguage::text("Автопрокрутка"));
+    m_autoScroll = UiLanguage::action(journalMenu->addAction(QString{}), "Автопрокрутка");
     m_autoScroll->setCheckable(true);
-    m_autoScroll->setToolTip(UiLanguage::text("Показывать последнюю запись и её ответ"));
+    UiLanguage::set(m_autoScroll, "toolTip", "Показывать последнюю запись и её ответ");
     m_autoScroll->setChecked(autoScroll);
     journalMenu->addSeparator();
-    m_exportJson = journalMenu->addAction(UiLanguage::text("Экспорт показанных записей в JSON…"));
-    m_exportCsv = journalMenu->addAction(UiLanguage::text("Экспорт показанных записей в CSV…"));
+    m_exportJson = UiLanguage::action(journalMenu->addAction(QString{}), "Экспорт показанных записей в JSON…");
+    m_exportCsv = UiLanguage::action(journalMenu->addAction(QString{}), "Экспорт показанных записей в CSV…");
     journalMenuButton->setMenu(journalMenu);
-    m_clear = new QPushButton(AppTheme::icon(u"trash"), UiLanguage::text("Очистить"), toolbar);
+    m_clear = new QPushButton(AppTheme::icon(u"trash"), QString{}, toolbar);
+    UiLanguage::set(m_clear, "text", "Очистить");
     m_clear->setObjectName(QStringLiteral("compactButton"));
     m_clear->setProperty("iconName", QStringLiteral("trash"));
     tools->addWidget(m_clear);
     m_detailsToggle = new QToolButton(toolbar);
     m_detailsToggle->setObjectName(QStringLiteral("toolbarButton"));
-    m_detailsToggle->setText(UiLanguage::text("Детали"));
+    UiLanguage::set(m_detailsToggle, "text", "Детали");
     m_detailsToggle->setCheckable(true);
-    m_detailsToggle->setToolTip(UiLanguage::text("Показать или скрыть ответ выбранной записи"));
-    m_detailsToggle->setAccessibleName(UiLanguage::text("Показать детали записи"));
+    UiLanguage::set(m_detailsToggle, "toolTip", "Показать или скрыть ответ выбранной записи");
+    UiLanguage::set(m_detailsToggle, "accessibleName", "Показать детали записи");
     tools->addWidget(m_detailsToggle);
     tools->addWidget(journalMenuButton);
     layout->addWidget(toolbar);
@@ -555,8 +638,8 @@ LogPane::LogPane(RequestLogModel *model, const QByteArray &splitterState, bool a
     m_view->setColumnWidth(RequestLogModel::DurationColumn, qMax(88,
         fontMetrics().horizontalAdvance(m_model->headerData(RequestLogModel::DurationColumn, Qt::Horizontal).toString()) + 24));
     m_tableStack->addWidget(m_view);
-    m_tableStack->addWidget(emptyState(UiLanguage::text("История начнётся с первого запроса"),
-        UiLanguage::text("Отправьте запрос — здесь появятся статус, время и ответ сервера."),
+    m_tableStack->addWidget(emptyState("История начнётся с первого запроса",
+        "Отправьте запрос — здесь появятся статус, время и ответ сервера.",
         m_tableStack, &m_emptyTitle, &m_emptyHint));
     tableLayout->addWidget(m_tableStack);
     m_splitter->addWidget(tableCard);
@@ -585,20 +668,26 @@ LogPane::LogPane(RequestLogModel *model, const QByteArray &splitterState, bool a
     m_tabs->setIconSize(QSize(14, 14));
     m_tabs->setProperty("tabIconNames", QStringList{QStringLiteral("download"), QStringLiteral("headers"),
                                                   QStringLiteral("upload"), QStringLiteral("headers")});
-    m_tabs->addTab(AppTheme::icon(u"download"), UiLanguage::text("Ответ"));
-    m_tabs->addTab(AppTheme::icon(u"headers"), UiLanguage::text("Заголовки"));
-    m_tabs->addTab(AppTheme::icon(u"upload"), UiLanguage::text("Запрос"));
-    m_tabs->addTab(AppTheme::icon(u"headers"), UiLanguage::text("Заголовки запроса"));
-    m_tabs->setTabToolTip(0, UiLanguage::text("Тело ответа"));
-    m_tabs->setTabToolTip(1, UiLanguage::text("Заголовки ответа"));
-    m_tabs->setTabToolTip(2, UiLanguage::text("Тело запроса"));
+    UiLanguage::addTab(m_tabs, "Ответ", AppTheme::icon(u"download"));
+    UiLanguage::addTab(m_tabs, "Заголовки", AppTheme::icon(u"headers"));
+    UiLanguage::addTab(m_tabs, "Запрос", AppTheme::icon(u"upload"));
+    UiLanguage::addTab(m_tabs, "Заголовки запроса", AppTheme::icon(u"headers"));
+    UiLanguage::bind(m_tabs, "hint0", [this] {
+        m_tabs->setTabToolTip(0, UiLanguage::text("Тело ответа"));
+    });
+    UiLanguage::bind(m_tabs, "hint1", [this] {
+        m_tabs->setTabToolTip(1, UiLanguage::text("Заголовки ответа"));
+    });
+    UiLanguage::bind(m_tabs, "hint2", [this] {
+        m_tabs->setTabToolTip(2, UiLanguage::text("Тело запроса"));
+    });
     detailsTools->addWidget(m_tabs, 1);
     auto *closeDetails = new QToolButton(detailsHeading);
     closeDetails->setObjectName(QStringLiteral("toolbarButton"));
     closeDetails->setProperty("iconName", QStringLiteral("close"));
     closeDetails->setIcon(AppTheme::icon(u"close"));
-    closeDetails->setToolTip(UiLanguage::text("Свернуть детали · запись можно открыть снова щелчком"));
-    closeDetails->setAccessibleName(UiLanguage::text("Свернуть детали"));
+    UiLanguage::set(closeDetails, "toolTip", "Свернуть детали · запись можно открыть снова щелчком");
+    UiLanguage::set(closeDetails, "accessibleName", "Свернуть детали");
     detailsTools->addWidget(closeDetails);
     detailsLayout->addWidget(detailsHeading);
     m_copy = new QToolButton(detailsCard);
@@ -606,25 +695,25 @@ LogPane::LogPane(RequestLogModel *model, const QByteArray &splitterState, bool a
     m_copy->setProperty("iconName", QStringLiteral("copy"));
     m_copy->setIcon(AppTheme::icon(u"copy"));
     m_copy->setIconSize(QSize(16, 16));
-    m_copy->setText(UiLanguage::text("Копировать"));
+    UiLanguage::set(m_copy, "text", "Копировать");
     m_copy->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-    m_copy->setToolTip(UiLanguage::text("Копировать содержимое выбранной вкладки"));
-    m_copy->setAccessibleName(UiLanguage::text("Копировать содержимое"));
+    UiLanguage::set(m_copy, "toolTip", "Копировать содержимое выбранной вкладки");
+    UiLanguage::set(m_copy, "accessibleName", "Копировать содержимое");
     m_copy->setPopupMode(QToolButton::MenuButtonPopup);
     auto *copyMenu = new QMenu(m_copy);
-    m_copyUrl = copyMenu->addAction(UiLanguage::text("Копировать адрес"));
-    m_copyRequest = copyMenu->addAction(UiLanguage::text("Копировать тело запроса"));
-    m_copyResponse = copyMenu->addAction(UiLanguage::text("Копировать тело ответа"));
-    m_copyCurl = copyMenu->addAction(UiLanguage::text("Копировать как cURL (Bash / sh)"));
+    m_copyUrl = UiLanguage::action(copyMenu->addAction(QString{}), "Копировать адрес");
+    m_copyRequest = UiLanguage::action(copyMenu->addAction(QString{}), "Копировать тело запроса");
+    m_copyResponse = UiLanguage::action(copyMenu->addAction(QString{}), "Копировать тело ответа");
+    m_copyCurl = UiLanguage::action(copyMenu->addAction(QString{}), "Копировать как cURL (Bash / sh)");
     copyMenu->addSeparator();
-    m_saveBody = copyMenu->addAction(UiLanguage::text("Сохранить тело в файл…"));
-    m_replay = copyMenu->addAction(UiLanguage::text("Создать запрос из записи…"));
-    m_replay->setToolTip(UiLanguage::text("Открыть новый черновик с параметрами этой отправки"));
+    m_saveBody = UiLanguage::action(copyMenu->addAction(QString{}), "Сохранить тело в файл…");
+    m_replay = UiLanguage::action(copyMenu->addAction(QString{}), "Создать запрос из записи…");
+    UiLanguage::set(m_replay, "toolTip", "Открыть новый черновик с параметрами этой отправки");
     m_copy->setMenu(copyMenu);
 
     m_detailStack = new QStackedWidget(detailsCard);
-    m_detailStack->addWidget(emptyState(UiLanguage::text("Всё об ответе — здесь"),
-        UiLanguage::text("Выберите запись в журнале, чтобы посмотреть данные и заголовки."), m_detailStack));
+    m_detailStack->addWidget(emptyState("Всё об ответе — здесь",
+        "Выберите запись в журнале, чтобы посмотреть данные и заголовки.", m_detailStack));
     auto *detailPage = new QWidget(m_detailStack);
     auto *detailLayout = new QVBoxLayout(detailPage);
     detailLayout->setContentsMargins(0, 0, 0, 0);
@@ -644,13 +733,13 @@ LogPane::LogPane(RequestLogModel *model, const QByteArray &splitterState, bool a
     metadata->addWidget(m_copy);
     m_saveBodyButton = new QToolButton(detailPage);
     m_saveBodyButton->setObjectName(QStringLiteral("toolbarButton"));
-    m_saveBodyButton->setText(UiLanguage::text("Сохранить"));
-    m_saveBodyButton->setToolTip(UiLanguage::text("Сохранить исходные байты тела в файл"));
+    UiLanguage::set(m_saveBodyButton, "text", "Сохранить");
+    UiLanguage::set(m_saveBodyButton, "toolTip", "Сохранить исходные байты тела в файл");
     metadata->addWidget(m_saveBodyButton);
     m_replayButton = new QToolButton(detailPage);
     m_replayButton->setObjectName(QStringLiteral("toolbarButton"));
-    m_replayButton->setText(UiLanguage::text("В запрос"));
-    m_replayButton->setToolTip(UiLanguage::text("Создать новый редактируемый запрос из этой записи"));
+    UiLanguage::set(m_replayButton, "text", "В запрос");
+    UiLanguage::set(m_replayButton, "toolTip", "Создать новый редактируемый запрос из этой записи");
     metadata->addWidget(m_replayButton);
     detailLayout->addLayout(metadata);
     m_error = new ElidedLabel(detailPage);
@@ -671,7 +760,7 @@ LogPane::LogPane(RequestLogModel *model, const QByteArray &splitterState, bool a
             + qCeil(2 * editor->document()->documentMargin())
             + 2 * editor->frameWidth() + editor->horizontalScrollBar()->sizeHint().height());
         editor->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Ignored);
-        auto *highlighter = new PayloadHighlighter(editor->document());
+        auto *highlighter = new PayloadHighlighter(editor->document(), editor);
         highlighter->setEscapesEnabled(false);
         highlighter->setJsonEnabled(json);
         m_pages->addWidget(editor);
@@ -681,10 +770,12 @@ LogPane::LogPane(RequestLogModel *model, const QByteArray &splitterState, bool a
     m_responseBody->setMode(prettyJson ? BodyViewMode::Json : BodyViewMode::Text);
     m_pages->addWidget(m_responseBody);
     m_responseHeaders = makeEditor(UiLanguage::text("Заголовки ответа отсутствуют"), false);
+    UiLanguage::set(m_responseHeaders, "placeholderText", "Заголовки ответа отсутствуют");
     m_requestBody = new ResponseViewer(m_pages);
     m_requestBody->setMode(BodyViewMode::Text);
     m_pages->addWidget(m_requestBody);
     m_requestHeaders = makeEditor(UiLanguage::text("Заголовки запроса отсутствуют"), false);
+    UiLanguage::set(m_requestHeaders, "placeholderText", "Заголовки запроса отсутствуют");
     detailLayout->addWidget(m_pages, 1);
     m_detailStack->addWidget(detailPage);
     detailsLayout->addWidget(m_detailStack, 1);
@@ -699,6 +790,15 @@ LogPane::LogPane(RequestLogModel *model, const QByteArray &splitterState, bool a
     m_expandedSplitterState = m_splitter->saveState();
     layout->addWidget(m_splitter, 1);
 
+    UiLanguage::onChange(this, [this] {
+        updateResultCount();
+        updateDetails();
+        setClearEnabled(m_clearAllowed);
+        m_view->setColumnWidth(RequestLogModel::DurationColumn, qMax(88,
+            fontMetrics().horizontalAdvance(m_model->headerData(RequestLogModel::DurationColumn, Qt::Horizontal).toString()) + 24));
+        m_view->horizontalHeader()->viewport()->update();
+        m_view->viewport()->update();
+    });
     auto *searchDelay = new QTimer(this);
     searchDelay->setSingleShot(true);
     searchDelay->setInterval(160);
@@ -708,8 +808,8 @@ LogPane::LogPane(RequestLogModel *model, const QByteArray &splitterState, bool a
         updateResultCount();
         updateDetails();
     });
-    connect(m_filter, &QComboBox::currentIndexChanged, this, [this](int index) {
-        m_proxy->setResultFilter(static_cast<LogFilter>(m_filter->itemData(index).toInt()));
+    connect(m_filter, &QTabBar::currentChanged, this, [this](int index) {
+        m_proxy->setResultFilter(static_cast<LogFilter>(m_filter->tabData(index).toInt()));
     });
     connect(m_autoScroll, &QAction::toggled, this, [this](bool checked) {
         if (m_autoScrollChanged) m_autoScrollChanged(checked);
@@ -744,7 +844,7 @@ LogPane::LogPane(RequestLogModel *model, const QByteArray &splitterState, bool a
     }
     connect(m_proxy, &QAbstractItemModel::modelReset, this, [this] { updateResultCount(); });
     connect(m_proxy, &QAbstractItemModel::layoutChanged, this, [this] { updateResultCount(); });
-    connect(m_filter, &QComboBox::currentIndexChanged, this, [this] { updateResultCount(); updateDetails(); });
+    connect(m_filter, &QTabBar::currentChanged, this, [this] { updateResultCount(); updateDetails(); });
     connect(m_splitter, &QSplitter::splitterMoved, this, [this] {
         if (m_detailsCard->isVisible()) {
             m_expandedSplitterState = m_splitter->saveState();
@@ -757,13 +857,13 @@ LogPane::LogPane(RequestLogModel *model, const QByteArray &splitterState, bool a
     connect(m_copy, &QToolButton::clicked, this, &LogPane::copyCurrentPage);
     connect(m_copyUrl, &QAction::triggered, this, [this] {
         if (const auto *entry = currentEntry())
-            QApplication::clipboard()->setText(entry->url.toString(QUrl::FullyEncoded));
+            copyTextWithFeedback(entry->url.toString(QUrl::FullyEncoded));
     });
     connect(m_copyRequest, &QAction::triggered, this, [this] {
-        if (const auto *entry = currentEntry()) QApplication::clipboard()->setText(entry->requestBody);
+        if (const auto *entry = currentEntry()) copyTextWithFeedback(entry->requestBody);
     });
     connect(m_copyResponse, &QAction::triggered, this, [this] {
-        if (const auto *entry = currentEntry()) QApplication::clipboard()->setText(entry->responseBody);
+        if (const auto *entry = currentEntry()) copyTextWithFeedback(entry->responseBody);
     });
     connect(m_copyCurl, &QAction::triggered, this, &LogPane::copyAsCurl);
     connect(m_saveBody, &QAction::triggered, this, &LogPane::saveCurrentBody);
@@ -840,7 +940,7 @@ void LogPane::revealLatestEntry()
         // journal search/filter excludes this pending entry.
         m_search->clear();
         m_proxy->setSearchText({});
-        m_filter->setCurrentIndex(m_filter->findData(static_cast<int>(LogFilter::All)));
+        m_filter->setCurrentIndex(0);
     }
     selectEntry(identity);
     setDetailsOpen(true);
@@ -894,8 +994,7 @@ void LogPane::updateDetails()
     const QString state = resultState(entry->result);
     if (m_status->property("state").toString() != state) {
         m_status->setProperty("state", state);
-        m_status->style()->unpolish(m_status);
-        m_status->style()->polish(m_status);
+        m_status->update();
     }
     m_timing->setText(entry->result == RequestResult::Pending || entry->result == RequestResult::Skipped
         ? UiLanguage::text("— мс") : UiLanguage::text("%1 мс").arg(entry->elapsedMs));
@@ -964,7 +1063,7 @@ void LogPane::updateResultCount()
     m_statistics->setText(summary);
     m_successDot->setVisible(completed > 0);
     m_meanDuration->setText(completed > 0 ? UiLanguage::text("%1 мс").arg(duration / completed) : QStringLiteral("—"));
-    m_meanDuration->setToolTip(UiLanguage::text("Среднее время завершённых запросов"));
+    UiLanguage::set(m_meanDuration, "toolTip", "Среднее время завершённых запросов");
     m_statistics->setToolTip(UiLanguage::text("Среди показанных записей: успешных %1 из %2 завершённых.\n"
         "Среднее время не включает ожидание, отменённые и пропущенные записи.").arg(successful).arg(completed));
     m_live->setVisible(pending > 0);
@@ -1026,14 +1125,14 @@ void LogPane::copyCurrentPage()
 {
     if (!currentEntry()) return;
     if (const auto *viewer = currentBodyViewer()) {
-        QApplication::clipboard()->setText(viewer->fullDisplayText());
+        copyTextWithFeedback(viewer->fullDisplayText());
     } else {
         const auto *entry = currentEntry();
-        QApplication::clipboard()->setText(headersText(m_tabs->currentIndex() == 1
+        copyTextWithFeedback(headersText(m_tabs->currentIndex() == 1
             ? entry->responseHeaders : entry->requestHeaders));
     }
-    m_copy->setText(UiLanguage::text("Скопировано"));
-    QTimer::singleShot(1600, this, [this] { m_copy->setText(UiLanguage::text("Копировать")); });
+    UiLanguage::set(m_copy, "text", "Скопировано");
+    QTimer::singleShot(1600, this, [this] { UiLanguage::set(m_copy, "text", "Копировать"); });
 }
 
 ResponseViewer *LogPane::currentBodyViewer() const
@@ -1070,7 +1169,7 @@ void LogPane::copyAsCurl()
     }
     if (httpMethodHasBody(entry->method))
         command += QStringLiteral(" \\\n  --data-binary %1").arg(shellQuote(QString::fromUtf8(body)));
-    QApplication::clipboard()->setText(command);
+    copyTextWithFeedback(command);
 }
 
 void LogPane::saveCurrentBody()

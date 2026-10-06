@@ -55,6 +55,9 @@ target_link_libraries(MultiSenderCore PUBLIC
 )
 
 qt_add_executable(MultiSender WIN32
+    src/uilanguagewidgets.cpp
+    src/appstyle.cpp
+    src/appstyle.h
     src/apptheme.cpp
     src/apptheme.h
     src/codeeditor.cpp
@@ -82,10 +85,6 @@ qt_add_resources(MultiSender "ui_translations"
 qt_add_resources(MultiSender "app_icons"
     PREFIX "/"
     FILES Installer/MultiSender.ico
-          Installer/check-dark.svg Installer/check-light.svg
-          Installer/chevron-dark.svg Installer/chevron-light.svg
-          Installer/spin-up-dark.svg Installer/spin-down-dark.svg
-          Installer/spin-up-light.svg Installer/spin-down-light.svg
 )
 
 if(WIN32)

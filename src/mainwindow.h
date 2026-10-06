@@ -30,8 +30,6 @@ public:
     explicit MainWindow(QWidget *parent = nullptr);
     ~MainWindow() override;
 
-    static QString applicationStyleSheet();
-
 protected:
     void closeEvent(QCloseEvent *event) override;
 
@@ -144,5 +142,4 @@ private:
     QTimer *m_historySaveTimer = nullptr;
     bool m_rebuildingTree = false;
     bool m_closing = false;
-    bool m_restartForLanguage = false;
 };

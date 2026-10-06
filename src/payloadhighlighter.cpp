@@ -7,17 +7,22 @@
 #include <QFont>
 #include <QGuiApplication>
 #include <QPalette>
+#include <QSignalBlocker>
 #include <QTimer>
+#include <QWidget>
 
-PayloadHighlighter::PayloadHighlighter(QTextDocument *document)
-    : QSyntaxHighlighter(document)
+PayloadHighlighter::PayloadHighlighter(QTextDocument *document, QWidget *editor)
+    : QSyntaxHighlighter(document), m_editor(editor)
 {
     setThemeColors(QGuiApplication::palette().color(QPalette::Base).lightness() < 128);
-    if (qGuiApp) qGuiApp->installEventFilter(this);
+    if (editor) editor->installEventFilter(this);
 }
 
 void PayloadHighlighter::setThemeColors(bool dark)
 {
+    if (m_themeInitialized && m_dark == dark) return;
+    m_themeInitialized = true;
+    m_dark = dark;
     m_escapeFormat.setForeground(QColor(dark ? QStringLiteral("#89bdf6") : QStringLiteral("#326fb0")));
     m_escapeFormat.setFontWeight(QFont::Normal);
     m_invalidEscapeFormat.setUnderlineColor(QColor(dark ? QStringLiteral("#ef9290") : QStringLiteral("#bd4a48")));
@@ -27,19 +32,27 @@ void PayloadHighlighter::setThemeColors(bool dark)
     m_numberFormat.setForeground(QColor(dark ? QStringLiteral("#efbd82") : QStringLiteral("#a56821")));
     m_literalFormat.setForeground(QColor(dark ? QStringLiteral("#baa0e9") : QStringLiteral("#855abd")));
     m_punctuationFormat.setForeground(QColor(dark ? QStringLiteral("#a1aca9") : QStringLiteral("#536b60")));
-    rehighlight();
+    if (m_escapesEnabled || m_jsonEnabled) {
+        // Updating syntax formats can emit the editor's textChanged signal.
+        // A theme change must only repaint, without publishing a request edit.
+        const QSignalBlocker blocker(m_editor.data());
+        rehighlight();
+    }
 }
 
 bool PayloadHighlighter::eventFilter(QObject *watched, QEvent *event)
 {
-    if (event->type() == QEvent::ApplicationPaletteChange && !m_themeRefreshPending) {
-        // Application palette changes are delivered to multiple widgets. Coalesce
-        // them and recolor every existing block after the new palette is applied.
-        m_themeRefreshPending = true;
-        QTimer::singleShot(0, this, [this] {
-            m_themeRefreshPending = false;
-            setThemeColors(QGuiApplication::palette().color(QPalette::Base).lightness() < 128);
-        });
+    if (event->type() == QEvent::PaletteChange || event->type() == QEvent::ApplicationPaletteChange
+        || event->type() == QEvent::Show) {
+        // Hidden editors catch up when shown, without a global filter per document.
+        if (m_editor && m_editor->isVisible() && !m_themeRefreshPending) {
+            m_themeRefreshPending = true;
+            QTimer::singleShot(0, this, [this] {
+                m_themeRefreshPending = false;
+                if (m_editor && m_editor->isVisible())
+                    setThemeColors(QGuiApplication::palette().color(QPalette::Base).lightness() < 128);
+            });
+        }
     }
     return QSyntaxHighlighter::eventFilter(watched, event);
 }

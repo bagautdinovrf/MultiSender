@@ -2,11 +2,14 @@
 
 #include <QSyntaxHighlighter>
 #include <QTextCharFormat>
+#include <QPointer>
+
+class QWidget;
 
 class PayloadHighlighter final : public QSyntaxHighlighter
 {
 public:
-    explicit PayloadHighlighter(QTextDocument *document);
+    explicit PayloadHighlighter(QTextDocument *document, QWidget *editor);
 
     void setEscapesEnabled(bool enabled);
     void setJsonEnabled(bool enabled);
@@ -22,6 +25,9 @@ private:
     bool m_escapesEnabled = false;
     bool m_jsonEnabled = false;
     bool m_themeRefreshPending = false;
+    bool m_themeInitialized = false;
+    bool m_dark = false;
+    QPointer<QWidget> m_editor;
     QTextCharFormat m_escapeFormat;
     QTextCharFormat m_invalidEscapeFormat;
     QTextCharFormat m_keyFormat;

@@ -63,7 +63,7 @@ struct RequestConfig
 {
     RequestProtocol protocol = RequestProtocol::Http;
     QString host = QStringLiteral("127.0.0.1");
-    quint16 port = 8081;
+    quint16 port = 0; // HTTP/HTTPS use the scheme's default port when zero.
     QString target = QStringLiteral("/test");
     HttpMethod method = HttpMethod::Get;
     QString body;
@@ -103,7 +103,7 @@ struct RequestDefinition
     int timeoutMs = 3000;
     SerialPortSettings serial;
     InheritedValue<QString> host{QStringLiteral("127.0.0.1"), false};
-    InheritedValue<quint16> port{8081, false};
+    InheritedValue<quint16> port{0, false};
     InheritedValue<int> intervalMs{1000, false};
     InheritedValue<int> maxInFlight{100, false};
 };
@@ -113,7 +113,7 @@ struct CollectionDefinition
     QUuid id = QUuid::createUuid();
     QString name = UiLanguage::text("Новая коллекция");
     QString host = QStringLiteral("127.0.0.1");
-    quint16 port = 8081;
+    quint16 port = 0;
     int intervalMs = 1000;
     int maxInFlight = 100;
     QVector<RequestDefinition> requests;

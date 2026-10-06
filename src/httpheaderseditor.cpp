@@ -3,8 +3,8 @@
 
 #include "apptheme.h"
 
-#include <QBrush>
 #include <QEvent>
+#include <QFrame>
 #include <QHeaderView>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -139,24 +139,28 @@ HttpHeadersEditor::HttpHeadersEditor(QWidget *parent) : QWidget(parent)
     toolbar->setSpacing(7);
     m_count = new QLabel(QStringLiteral("0"), this);
     m_count->setObjectName(QStringLiteral("fieldLabel"));
-    m_count->setAccessibleName(UiLanguage::text("Число HTTP-заголовков"));
+    UiLanguage::set(m_count, "accessibleName", "Число HTTP-заголовков");
 
-    m_add = new QPushButton(UiLanguage::text("Добавить заголовок"), this);
+    m_add = new QPushButton(QString{}, this);
+
+    UiLanguage::set(m_add, "text", "Добавить заголовок");
     m_add->setObjectName(QStringLiteral("toolbarButton"));
     m_add->setProperty("iconName", QStringLiteral("plus"));
     m_add->setIcon(AppTheme::icon(u"plus"));
     m_add->setIconSize(QSize(14, 14));
-    m_add->setAccessibleName(UiLanguage::text("Добавить HTTP-заголовок"));
-    m_add->setToolTip(UiLanguage::text("Добавить строку HTTP-заголовка"));
+    UiLanguage::set(m_add, "accessibleName", "Добавить HTTP-заголовок");
+    UiLanguage::set(m_add, "toolTip", "Добавить строку HTTP-заголовка");
     toolbar->addWidget(m_add);
 
-    m_remove = new QPushButton(UiLanguage::text("Удалить"), this);
+    m_remove = new QPushButton(QString{}, this);
+
+    UiLanguage::set(m_remove, "text", "Удалить");
     m_remove->setObjectName(QStringLiteral("toolbarButton"));
     m_remove->setProperty("iconName", QStringLiteral("trash"));
     m_remove->setIcon(AppTheme::icon(u"trash"));
     m_remove->setIconSize(QSize(14, 14));
-    m_remove->setAccessibleName(UiLanguage::text("Удалить выбранный HTTP-заголовок"));
-    m_remove->setToolTip(UiLanguage::text("Удалить выбранную строку"));
+    UiLanguage::set(m_remove, "accessibleName", "Удалить выбранный HTTP-заголовок");
+    UiLanguage::set(m_remove, "toolTip", "Удалить выбранную строку");
     m_remove->setEnabled(false);
     toolbar->addWidget(m_remove);
     toolbar->addStretch();
@@ -165,16 +169,22 @@ HttpHeadersEditor::HttpHeadersEditor(QWidget *parent) : QWidget(parent)
     m_table = new QTableWidget(0, 3, this);
     m_table->setLayoutDirection(Qt::LeftToRight);
     m_table->setObjectName(QStringLiteral("httpHeadersTable"));
-    m_table->setAccessibleName(UiLanguage::text("HTTP-заголовки запроса"));
+    UiLanguage::set(m_table, "accessibleName", "HTTP-заголовки запроса");
+    UiLanguage::bind(m_table, "headers", [this] {
+        const QSignalBlocker blocker(m_table);
     m_table->setHorizontalHeaderLabels({QString(), UiLanguage::text("КЛЮЧ"), UiLanguage::text("ЗНАЧЕНИЕ")});
-    m_table->setStyleSheet(QStringLiteral(
-        "QTableWidget#httpHeadersTable { background: transparent; border: none; }"
-        "QTableWidget#httpHeadersTable::item { border: none; padding: 0; }"
-        "QHeaderView { background: transparent; }"
-        "QHeaderView::section { background: transparent; border: none; padding: 0 10px; }"));
+    });
+    m_table->setFrameShape(QFrame::NoFrame);
+    m_table->horizontalHeader()->setObjectName(QStringLiteral("httpHeadersHeader"));
+    UiLanguage::bind(m_table, "hint0", [this] {
     m_table->horizontalHeaderItem(0)->setToolTip(UiLanguage::text("Отметьте заголовки, которые нужно отправить"));
+    });
+    UiLanguage::bind(m_table, "hint1", [this] {
     m_table->horizontalHeaderItem(1)->setToolTip(UiLanguage::text("Имя HTTP-заголовка: латинские буквы, цифры и разрешённые символы"));
+    });
+    UiLanguage::bind(m_table, "hint2", [this] {
     m_table->horizontalHeaderItem(2)->setToolTip(UiLanguage::text("Значение сохраняется и передаётся в UTF-8 без потери символов"));
+    });
     m_table->setItemDelegate(new HeaderDelegate(m_table, [this] { notifyChanged(); }));
     m_table->setSelectionBehavior(QAbstractItemView::SelectItems);
     m_table->setSelectionMode(QAbstractItemView::SingleSelection);
@@ -202,15 +212,17 @@ HttpHeadersEditor::HttpHeadersEditor(QWidget *parent) : QWidget(parent)
     m_table->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     layout->addWidget(m_table);
 
-    m_empty = new QLabel(UiLanguage::text("Здесь можно добавить авторизацию, тип содержимого и другие заголовки запроса."), this);
+    m_empty = new QLabel(QString{}, this);
+
+    UiLanguage::set(m_empty, "text", "Здесь можно добавить авторизацию, тип содержимого и другие заголовки запроса.");
     m_empty->setObjectName(QStringLiteral("fieldLabel"));
     m_empty->setWordWrap(true);
     m_empty->setContentsMargins(0, 5, 0, 8);
     layout->addWidget(m_empty);
     layout->addLayout(toolbar);
     layout->addStretch();
-    setToolTip(UiLanguage::text("Неотмеченные заголовки сохраняются, но не отправляются. "
-                              "Полностью пустые строки пропускаются."));
+    UiLanguage::set(this, "toolTip", "Неотмеченные заголовки сохраняются, но не отправляются. "
+                              "Полностью пустые строки пропускаются.");
     setFocusProxy(m_table);
     QWidget::setTabOrder(m_add, m_remove);
     QWidget::setTabOrder(m_remove, m_table);
@@ -231,6 +243,15 @@ HttpHeadersEditor::HttpHeadersEditor(QWidget *parent) : QWidget(parent)
         notifyChanged();
     });
     updateAppearance();
+    UiLanguage::onChange(this, [this] {
+        const QSignalBlocker blocker(m_table);
+        for (int row = 0; row < m_table->rowCount(); ++row) {
+            m_table->item(row, 0)->setToolTip(UiLanguage::text("Отправлять этот заголовок"));
+            m_table->item(row, 1)->setToolTip(UiLanguage::text("Имя HTTP-заголовка. Для редактирования нажмите F2 или начните ввод."));
+            m_table->item(row, 2)->setToolTip(UiLanguage::text("Значение HTTP-заголовка; текст сохраняется в UTF-8."));
+        }
+        updateAppearance();
+    });
 }
 
 void HttpHeadersEditor::setHeaders(const QVector<HttpHeader> &newHeaders)
@@ -337,9 +358,6 @@ void HttpHeadersEditor::updateAppearance()
     for (int row = 0; row < m_table->rowCount(); ++row) {
         const bool enabled = m_table->item(row, 0)->checkState() == Qt::Checked;
         enabledCount += enabled;
-        const QBrush foreground(AppTheme::color(enabled ? u"text" : u"muted"));
-        m_table->item(row, 1)->setForeground(foreground);
-        m_table->item(row, 2)->setForeground(foreground);
     }
     m_count->setText(UiLanguage::text("Включено %1 из %2").arg(enabledCount).arg(m_table->rowCount()));
     m_count->setVisible(m_table->rowCount() > 0);
@@ -365,8 +383,10 @@ void HttpHeadersEditor::notifyChanged()
 void HttpHeadersEditor::changeEvent(QEvent *event)
 {
     QWidget::changeEvent(event);
-    if (event->type() == QEvent::PaletteChange || event->type() == QEvent::ApplicationPaletteChange) {
-        updateAppearance();
+    if (m_table && (event->type() == QEvent::PaletteChange
+                    || event->type() == QEvent::ApplicationPaletteChange)) {
+        // The delegate reads the theme while painting; model data and geometry are unchanged.
+        m_table->viewport()->update();
     }
 }
 

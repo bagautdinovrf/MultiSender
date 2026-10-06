@@ -1,9 +1,5 @@
 /build_agent/
 /backups/
-/build_electron/
-/electron/node_modules/
-/electron/dist/
-/electron/data/
 /build/
 /build-*/
 /.qtcreator/
@@ -18,3 +14,5 @@
 /MultiSender.history.json
 *.user
 *.log
+__pycache__/
+*.py[cod]

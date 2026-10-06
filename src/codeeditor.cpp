@@ -19,7 +19,7 @@ public:
     explicit CodeEditorGutter(CodeEditor *editor)
         : QWidget(editor), m_editor(editor)
     {
-        setAccessibleName(UiLanguage::text("Номера строк"));
+        UiLanguage::set(this, "accessibleName", "Номера строк");
         setAttribute(Qt::WA_TransparentForMouseEvents);
     }
 
@@ -52,6 +52,10 @@ CodeEditor::CodeEditor(QWidget *parent)
     setFont(codeFont);
     setTabStopDistance(fontMetrics().horizontalAdvance(u' ') * 2);
     document()->setDocumentMargin(10);
+    auto textOptions = document()->defaultTextOption();
+    textOptions.setTextDirection(Qt::LeftToRight);
+    textOptions.setAlignment(Qt::AlignLeft);
+    document()->setDefaultTextOption(textOptions);
     setCenterOnScroll(false);
 
     connect(this, &QPlainTextEdit::blockCountChanged, this, [this] {
@@ -109,8 +113,8 @@ void CodeEditor::updateGutterGeometry()
 {
     const int width = gutterWidth();
     setViewportMargins(width, 0, 0, 0);
-    // Follow the viewport rather than the outer frame so stylesheet padding and
-    // the horizontal scrollbar do not shift line numbers relative to the text.
+    // Follow the viewport so the native frame and horizontal scrollbar do not
+    // shift line numbers relative to the text.
     const QRect view = viewport()->geometry();
     m_gutter->setGeometry(view.left() - width, view.top(), width, view.height());
     m_gutter->update();
@@ -126,6 +130,13 @@ void CodeEditor::changeEvent(QEvent *event)
 {
     QPlainTextEdit::changeEvent(event);
     switch (event->type()) {
+    case QEvent::LayoutDirectionChange: {
+        auto textOptions = document()->defaultTextOption();
+        textOptions.setTextDirection(Qt::LeftToRight);
+        textOptions.setAlignment(Qt::AlignLeft);
+        document()->setDefaultTextOption(textOptions);
+        break;
+    }
     case QEvent::FontChange:
         setTabStopDistance(fontMetrics().horizontalAdvance(u' ') * 2);
         updateGutterGeometry();

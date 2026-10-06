@@ -42,14 +42,13 @@ void CollectionRequestDelegate::paint(QPainter *painter, const QStyleOptionViewI
         return QStyle::visualRect(item.direction, item.rect, rect);
     };
     const QRect content = item.rect.adjusted(10, 0, -12, 0);
-    const QRect badge = visualRect(QRect(content.left(), content.center().y() - 8, 42, 17));
 
     QFont badgeFont = item.font;
     badgeFont.setPixelSize(8);
     badgeFont.setWeight(QFont::DemiBold);
     const int operationWidth = QFontMetrics(badgeFont).horizontalAdvance(operation);
-    if (operationWidth > badge.width() - 4)
-        badgeFont.setPixelSize(qMax(1, badgeFont.pixelSize() * (badge.width() - 4) / operationWidth));
+    const int badgeWidth = operationWidth + (qMax(4, 42 - operationWidth) + 1) / 2;
+    const QRect badge = visualRect(QRect(content.left(), content.center().y() - 8, badgeWidth, 17));
 
     painter->save();
     painter->setClipRect(item.rect);
@@ -85,7 +84,7 @@ void CollectionRequestDelegate::paint(QPainter *painter, const QStyleOptionViewI
                           status);
     }
 
-    const int textLeft = content.left() + 54;
+    const int textLeft = content.left() + badgeWidth + 12;
     const int textWidth = qMax(0, statusRect.left() - 14 - textLeft);
     const Qt::Alignment alignment = Qt::AlignVCenter | Qt::AlignAbsolute
         | (item.direction == Qt::RightToLeft ? Qt::AlignRight : Qt::AlignLeft);

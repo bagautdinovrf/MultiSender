@@ -8,6 +8,10 @@
 #include <QLibraryInfo>
 #include <QLocale>
 #include <QTranslator>
+#include <QPointer>
+#include <QMap>
+#include <QVariant>
+#include <QAction>
 
 #include <memory>
 
@@ -24,9 +28,52 @@ public:
 };
 std::unique_ptr<CatalogueTranslator> catalogue;
 std::unique_ptr<QTranslator> qtTranslator;
+class Bindings final : public QObject {
+public:
+    explicit Bindings(QObject *parent) : QObject(parent) {}
+    QMap<QByteArray, std::function<void()>> captions;
+    std::function<void()> refresh;
+};
+QList<QPointer<Bindings>> bindings;
+Bindings *bindingsFor(QObject *owner) {
+    if (auto *existing = owner->property("uiLanguageBindings").value<QObject *>())
+        return static_cast<Bindings *>(existing);
+    auto *item = new Bindings(owner);
+    owner->setProperty("uiLanguageBindings", QVariant::fromValue(static_cast<QObject *>(item)));
+    bindings.append(item);
+    return item;
+}
 }
 
 namespace UiLanguage {
+QAction *action(QAction *value, const char *source) {
+    set(value, "text", source);
+    return value;
+}
+void bind(QObject *owner, const QByteArray &key, std::function<void()> update) {
+    bindingsFor(owner)->captions.insert(key, update);
+    update();
+}
+void set(QObject *object, const char *property, const char *source) {
+    const QByteArray key(property), original(source);
+    bind(object, key, [object, key, original] {
+        object->setProperty(key.constData(), text(original.constData()));
+    });
+}
+void onChange(QObject *owner, std::function<void()> update) {
+    bindingsFor(owner)->refresh = std::move(update);
+}
+void retranslate() {
+    bindings.removeIf([](const auto &item) { return item.isNull(); });
+    const auto snapshot = bindings;
+    for (const auto &item : snapshot) {
+        if (!item) continue;
+        const auto captions = item->captions;
+        for (const auto &update : captions) update();
+    }
+    for (const auto &item : snapshot)
+        if (item && item->refresh) item->refresh();
+}
 QString text(const char *source) { return QCoreApplication::translate("MultiSender", source); }
 QStringList available() { return {QStringLiteral("ru"), QStringLiteral("en"), QStringLiteral("es"), QStringLiteral("pt"), QStringLiteral("tr"), QStringLiteral("ar")}; }
 QString normalized(const QString &language) {

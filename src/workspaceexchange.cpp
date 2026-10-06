@@ -187,7 +187,7 @@ private:
     bool connection(const QJsonObject &object, QStringView path)
     {
         return string(object, u"host", path)
-            && integer(object, u"port", path, 1, 65'535)
+            && integer(object, u"port", path, 0, 65'535)
             && integer(object, u"intervalMs", path, 1, 86'400'000)
             && integer(object, u"maxInFlight", path, 1, 100'000);
     }

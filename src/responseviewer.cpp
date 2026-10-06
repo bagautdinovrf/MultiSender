@@ -98,14 +98,14 @@ ResponseViewer::ResponseViewer(QWidget *parent) : QWidget(parent)
     toolbar->setSpacing(5);
     m_mode = new QTabBar(toolbarWidget);
     m_mode->setObjectName(QStringLiteral("bodyViewMode"));
-    m_mode->setAccessibleName(UiLanguage::text("Режим просмотра тела"));
+    UiLanguage::set(m_mode, "accessibleName", "Режим просмотра тела");
     m_mode->setExpanding(false);
     m_mode->setDrawBase(false);
     m_mode->setUsesScrollButtons(false);
-    m_mode->addTab(UiLanguage::text("Текст"));
+    UiLanguage::addTab(m_mode, "Текст");
     m_mode->addTab(QStringLiteral("JSON"));
     m_mode->addTab(QStringLiteral("HEX"));
-    m_mode->setToolTip(UiLanguage::text("Текст UTF-8, форматированный JSON или исходные байты"));
+    UiLanguage::set(m_mode, "toolTip", "Текст UTF-8, форматированный JSON или исходные байты");
     toolbar->addWidget(m_mode);
     m_notice = new QLabel(this);
     m_notice->setObjectName(QStringLiteral("fieldLabel"));
@@ -114,8 +114,8 @@ ResponseViewer::ResponseViewer(QWidget *parent) : QWidget(parent)
     toolbar->addWidget(m_notice, 1);
     m_search = new QLineEdit(this);
     m_search->setObjectName(QStringLiteral("bodySearch"));
-    m_search->setAccessibleName(UiLanguage::text("Поиск в теле"));
-    m_search->setPlaceholderText(UiLanguage::text("Найти · Ctrl+F"));
+    UiLanguage::set(m_search, "accessibleName", "Поиск в теле");
+    UiLanguage::set(m_search, "placeholderText", "Найти · Ctrl+F");
     m_search->setClearButtonEnabled(true);
     m_search->setMinimumWidth(110);
     m_search->setMaximumWidth(180);
@@ -136,6 +136,11 @@ ResponseViewer::ResponseViewer(QWidget *parent) : QWidget(parent)
     };
     m_previous = makeNavigation(QStringLiteral("↑"), UiLanguage::text("Предыдущее совпадение · Shift+Enter"));
     m_next = makeNavigation(QStringLiteral("↓"), UiLanguage::text("Следующее совпадение · Enter"));
+    UiLanguage::set(m_previous, "toolTip", "Предыдущее совпадение · Shift+Enter");
+    UiLanguage::set(m_previous, "accessibleName", "Предыдущее совпадение · Shift+Enter");
+    UiLanguage::set(m_next, "toolTip", "Следующее совпадение · Enter");
+    UiLanguage::set(m_next, "accessibleName", "Следующее совпадение · Enter");
+    UiLanguage::onChange(this, [this] { render(); });
     layout->addWidget(toolbarWidget);
 
     m_editor = new CodeEditor(this);
@@ -150,7 +155,7 @@ ResponseViewer::ResponseViewer(QWidget *parent) : QWidget(parent)
         + 2 * m_editor->frameWidth() + m_editor->horizontalScrollBar()->sizeHint().height());
     m_editor->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Ignored);
     m_editor->document()->setUndoRedoEnabled(false);
-    m_highlighter = new PayloadHighlighter(m_editor->document());
+    m_highlighter = new PayloadHighlighter(m_editor->document(), m_editor);
     m_highlighter->setEscapesEnabled(false);
     m_highlighter->setJsonEnabled(false);
     layout->addWidget(m_editor, 1);

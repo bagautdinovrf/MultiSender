@@ -5,6 +5,24 @@
 #include <QRegularExpression>
 #include <QUrlQuery>
 
+namespace {
+
+struct HttpAddress
+{
+    QString host;
+    QUrl basePath;
+};
+
+HttpAddress parseHttpAddress(const QString &value)
+{
+    const QString address = value.trimmed();
+    const qsizetype separator = address.indexOf(u'/');
+    return {address.left(separator),
+            QUrl(separator < 0 ? QStringLiteral("/") : address.mid(separator), QUrl::StrictMode)};
+}
+
+} // namespace
+
 QString requestProtocolName(RequestProtocol protocol)
 {
     switch (protocol) {
@@ -117,12 +135,20 @@ QUrl buildRequestUrl(const RequestConfig &config)
         url.setQuery(query);
         return url;
     }
-    url.setHost(config.host.trimmed());
-    url.setPort(config.port);
+    url.setPort(config.port == 0 ? -1 : config.port);
     if (config.protocol == RequestProtocol::Http) {
+        const HttpAddress address = parseHttpAddress(config.host);
+        url.setHost(address.host, QUrl::StrictMode);
         const QUrl targetUrl(config.target, QUrl::StrictMode);
-        url.setPath(targetUrl.path());
-        url.setQuery(targetUrl.query());
+        QString path = address.basePath.path(QUrl::FullyEncoded);
+        while (path.endsWith(u'/')) {
+            path.chop(1);
+        }
+        path += targetUrl.path(QUrl::FullyEncoded);
+        url.setPath(path, QUrl::TolerantMode);
+        url.setQuery(targetUrl.query(QUrl::FullyEncoded), QUrl::TolerantMode);
+    } else {
+        url.setHost(config.host.trimmed(), QUrl::StrictMode);
     }
     return url;
 }
@@ -169,11 +195,23 @@ QString validateRequestConfig(const RequestConfig &config)
         if (host.isEmpty()) {
             return UiLanguage::text("Укажите адрес сервера");
         }
-        if (host.contains(u'/') || host.contains(QStringLiteral("://")) || host.contains(u' ')) {
-            return UiLanguage::text("В адресе укажите только имя хоста или IP без схемы и пути");
-        }
-        if (config.port == 0) {
-            return UiLanguage::text("Порт должен быть от 1 до 65535");
+        if (config.protocol == RequestProtocol::Http) {
+            const HttpAddress address = parseHttpAddress(host);
+            QUrl hostUrl;
+            hostUrl.setHost(address.host, QUrl::StrictMode);
+            if (host.contains(QStringLiteral("://")) || !hostUrl.isValid()
+                || hostUrl.host().isEmpty() || !address.basePath.isValid()
+                || !address.basePath.isRelative() || !address.basePath.host().isEmpty()
+                || address.basePath.hasQuery() || address.basePath.hasFragment()) {
+                return UiLanguage::text("Укажите имя хоста или IP и необязательный базовый путь, например example.com/api; схему и порт задайте отдельно");
+            }
+        } else {
+            if (host.contains(u'/') || host.contains(QStringLiteral("://")) || host.contains(u' ')) {
+                return UiLanguage::text("В адресе укажите только имя хоста или IP без схемы и пути");
+            }
+            if (config.port == 0) {
+                return UiLanguage::text("Для TCP/UDP укажите порт от 1 до 65535 в коллекции или параметрах запроса");
+            }
         }
     }
     if (config.protocol == RequestProtocol::Http) {
@@ -258,7 +296,7 @@ RequestConfig resolveRequestConfig(const CollectionDefinition &collection,
         ? request.intervalMs.value : collection.intervalMs;
     result.maxInFlight = request.maxInFlight.overridden
         ? request.maxInFlight.value : collection.maxInFlight;
-    result.target = request.target;
+    result.target = request.target.trimmed();
     result.method = request.method;
     result.body = request.body;
     result.headers = request.headers;

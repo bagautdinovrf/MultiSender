@@ -8,6 +8,7 @@
 #include "uilanguage.h"
 
 #include "payloadhighlighter.h"
+#include "payloadencoding.h"
 #include "requestcontroller.h"
 #include "requestfilterproxymodel.h"
 #include "requestlogmodel.h"
@@ -52,6 +53,7 @@
 #include <QSerialPort>
 #include <QSerialPortInfo>
 #include <QScrollArea>
+#include <QScreen>
 #include <QSignalBlocker>
 #include <QSizePolicy>
 #include <QSpinBox>
@@ -61,6 +63,8 @@
 #include <QStyle>
 #include <QStyledItemDelegate>
 #include <QStyleOptionViewItem>
+#include <QStyleOptionButton>
+#include <QStyleOptionTab>
 #include <QTabWidget>
 #include <QTabBar>
 #include <QTableView>
@@ -77,6 +81,120 @@
 #include <utility>
 
 namespace {
+
+class WorkspaceTabBar final : public QTabBar
+{
+public:
+    using QTabBar::QTabBar;
+    QSize tabSizeHint(int index) const override
+    {
+        QSize size = QTabBar::tabSizeHint(index);
+        QFont textFont = font();
+        textFont.setPixelSize(10);
+        int width = QFontMetrics(textFont).horizontalAdvance(tabText(index)) + 32;
+        for (const auto side : {QTabBar::LeftSide, QTabBar::RightSide})
+            if (const auto *button = tabButton(index, side)) width += button->width() + 6;
+        size.setWidth(qBound(142, width, 245));
+        return size;
+    }
+    QSize minimumTabSizeHint(int index) const override { return tabSizeHint(index); }
+protected:
+    void paintEvent(QPaintEvent *) override
+    {
+        QPainter painter(this);
+        const auto drawTab = [this, &painter](int index) {
+            if (!isTabVisible(index)) return;
+            QStyleOptionTab option;
+            initStyleOption(&option, index);
+            option.text.clear();
+            style()->drawControl(QStyle::CE_TabBarTab, &option, &painter, this);
+            QRect textRect = tabRect(index).adjusted(12, 0, -12, 0);
+            if (const auto *badge = tabButton(index, QTabBar::LeftSide)) {
+                if (isRightToLeft()) textRect.setRight(badge->geometry().left() - 6);
+                else textRect.setLeft(badge->geometry().right() + 6);
+            }
+            if (const auto *close = tabButton(index, QTabBar::RightSide)) {
+                if (isRightToLeft()) textRect.setLeft(close->geometry().right() + 6);
+                else textRect.setRight(close->geometry().left() - 6);
+            }
+            QFont textFont = font();
+            textFont.setPixelSize(10);
+            painter.save();
+            painter.setClipRect(tabRect(index));
+            painter.setFont(textFont);
+            painter.setPen(AppTheme::color(index == currentIndex() ? u"text" : u"secondary"));
+            painter.drawText(textRect, Qt::AlignVCenter | Qt::AlignAbsolute
+                | (isRightToLeft() ? Qt::AlignRight : Qt::AlignLeft),
+                QFontMetrics(textFont).elidedText(tabText(index), Qt::ElideRight, qMax(0, textRect.width())));
+            painter.restore();
+        };
+        for (int index = 0; index < count(); ++index)
+            if (index != currentIndex()) drawTab(index);
+        if (currentIndex() >= 0) drawTab(currentIndex());
+    }
+};
+
+class WorkspaceTabs final : public QTabWidget
+{
+public:
+    explicit WorkspaceTabs(QWidget *parent) : QTabWidget(parent)
+    {
+        auto *bar = new WorkspaceTabBar(this);
+        bar->setElideMode(Qt::ElideRight);
+        bar->setUsesScrollButtons(true);
+        setTabBar(bar);
+    }
+};
+
+class AddressBar final : public QFrame
+{
+public:
+    explicit AddressBar(QWidget *parent) : QFrame(parent)
+    {
+        connect(qApp, &QApplication::focusChanged, this, [this](QWidget *, QWidget *focused) {
+            const bool active = focused && (focused == this || isAncestorOf(focused));
+            if (property("focused").toBool() == active) return;
+            setProperty("focused", active);
+            update();
+        });
+    }
+};
+
+class SendButton final : public QPushButton
+{
+public:
+    using QPushButton::QPushButton;
+protected:
+    void paintEvent(QPaintEvent *) override
+    {
+        QStyleOptionButton option;
+        initStyleOption(&option);
+        const QString caption = option.text;
+        const QIcon sendIcon = option.icon;
+        option.text.clear();
+        option.icon = {};
+        QPainter painter(this);
+        style()->drawControl(QStyle::CE_PushButton, &option, &painter, this);
+        const QColor foreground = AppTheme::color(isEnabled() ? u"onAccent" : u"muted");
+        const int offset = isDown() ? 1 : 0;
+        const QRect content = rect().adjusted(17, 0, -17, 0).translated(0, offset);
+        const QRect key = QStyle::visualRect(layoutDirection(), content,
+            QRect(content.right() - 22, content.center().y() - 9, 23, 19));
+        const QRect iconRect = QStyle::visualRect(layoutDirection(), content,
+            QRect(content.left(), content.center().y() - 8, 16, 16));
+        sendIcon.paint(&painter, iconRect, Qt::AlignCenter, isEnabled() ? QIcon::Normal : QIcon::Disabled);
+        painter.setPen(foreground);
+        painter.drawText(QStyle::visualRect(layoutDirection(), content, content.adjusted(24, 0, -29, 0)),
+                         Qt::AlignCenter, caption);
+        QColor border = foreground;
+        border.setAlpha(85);
+        painter.setPen(border);
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.drawRoundedRect(key, 3, 3);
+        painter.setPen(foreground);
+        painter.drawText(key, Qt::AlignCenter, QStringLiteral("↵"));
+    }
+};
 
 class ThemeIcon final : public QWidget
 {
@@ -103,14 +221,18 @@ public:
     {
         setAttribute(Qt::WA_TransparentForMouseEvents);
     }
-    void setOperation(const QString &operation)
+    void setOperation(const QString &operation, bool running)
     {
         m_operation = operation;
+        m_running = running;
         QFont badgeFont = font();
         badgeFont.setPixelSize(8);
         badgeFont.setWeight(QFont::DemiBold);
         setFont(badgeFont);
-        setFixedSize(qMax(31, QFontMetrics(badgeFont).horizontalAdvance(operation)) + 12, 17);
+        const int textWidth = QFontMetrics(badgeFont).horizontalAdvance(operation);
+        const int previousPadding = qMax(31, textWidth) + 8 - textWidth;
+        const int badgeWidth = textWidth + (previousPadding + 1) / 2;
+        setFixedSize(badgeWidth + 7 + (running ? 11 : 0), 17);
         setAccessibleName(operation);
         update();
     }
@@ -124,7 +246,8 @@ protected:
         background.setAlpha(AppTheme::isDark() ? 28 : 22);
         painter.setPen(Qt::NoPen);
         painter.setBrush(background);
-        const QRect badgeRect = isRightToLeft() ? rect().adjusted(0, 0, -4, 0) : rect().adjusted(4, 0, 0, 0);
+        const QRect badgeRect = isRightToLeft() ? rect().adjusted(m_running ? 11 : 0, 0, -7, 0)
+                                               : rect().adjusted(7, 0, m_running ? -11 : 0, 0);
         painter.drawRoundedRect(badgeRect, 3, 3);
         painter.setPen(foreground);
         QFont badgeFont = font();
@@ -132,25 +255,32 @@ protected:
         badgeFont.setWeight(QFont::DemiBold);
         painter.setFont(badgeFont);
         painter.drawText(badgeRect, Qt::AlignCenter, m_operation);
+        if (m_running) {
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(AppTheme::color(u"accent"));
+            painter.drawEllipse(QRectF(isRightToLeft() ? 2 : width() - 7, 6, 5, 5));
+        }
     }
 private:
     QString m_operation;
+    bool m_running = false;
 };
 
-void requestTabLabel(QTabWidget *tabs, int index, const QString &operation, const QString &name)
+void requestTabLabel(QTabWidget *tabs, int index, const QString &operation, const QString &name, bool running)
 {
     auto *badge = static_cast<OperationBadge *>(tabs->tabBar()->tabButton(index, QTabBar::LeftSide));
     if (!badge) {
         badge = new OperationBadge(tabs->tabBar());
         tabs->tabBar()->setTabButton(index, QTabBar::LeftSide, badge);
     }
-    badge->setOperation(operation);
+    badge->setOperation(operation, running);
     tabs->setTabText(index, name);
     tabs->setTabToolTip(index, operation + QStringLiteral(" · ") + name);
 }
 
 constexpr int TypeRole = Qt::UserRole;
 constexpr int IdRole = Qt::UserRole + 1;
+constexpr int TreeBusyRole = Qt::UserRole + 2;
 constexpr int SplitterHandleWidth = 7;
 
 class CollectionTreeWidget final : public QTreeWidget
@@ -184,8 +314,10 @@ public:
                const QModelIndex &index) const override
     {
         QStyleOptionViewItem item(compactOption(option, index));
+        const bool busy = index.data(TreeBusyRole).toBool();
         if (!index.parent().isValid()) {
             initStyleOption(&item, index);
+            item.palette.setColor(QPalette::Text, AppTheme::color(busy ? u"accent" : u"text"));
             const QString count = QString::number(index.model()->rowCount(index));
             QFont countFont = item.font;
             countFont.setPixelSize(10);
@@ -208,6 +340,9 @@ public:
             return;
         }
         initStyleOption(&item, index);
+        item.font.setWeight(busy ? QFont::Bold : QFont::Normal);
+        item.fontMetrics = QFontMetrics(item.font);
+        item.palette.setColor(QPalette::Text, AppTheme::color(busy ? u"accent" : u"text"));
         const QString name = item.text;
         const QString operation = index.siblingAtColumn(1).data().toString();
         item.text.clear();
@@ -220,7 +355,7 @@ public:
         QRect badge = item.rect.adjusted(6, 0, -6, 0);
         badge.setTop(item.rect.center().y() - 8);
         badge.setHeight(17);
-        const int width = badgeWidth(item);
+        const int width = badgeWidth(item, operation);
         if (m_tree->isRightToLeft()) badge.setLeft(badge.right() - width + 1);
         else badge.setWidth(width);
 
@@ -236,7 +371,16 @@ public:
         painter->setPen(foreground);
         painter->drawText(badge, Qt::AlignCenter, operation);
 
-        const QRect textRect = nameRect(item);
+        QRect textRect = nameRect(item, operation);
+        if (busy) {
+            const QRect dot = QStyle::visualRect(item.direction, item.rect,
+                QRect(item.rect.right() - 10, item.rect.center().y() - 2, 5, 5));
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(AppTheme::color(u"accent"));
+            painter->drawEllipse(dot);
+            if (m_tree->isRightToLeft()) textRect.adjust(12, 0, 0, 0);
+            else textRect.adjust(0, 0, -12, 0);
+        }
         painter->setFont(item.font);
         painter->setPen(item.palette.color(item.state.testFlag(QStyle::State_Selected)
             ? QPalette::HighlightedText : QPalette::Text));
@@ -252,24 +396,27 @@ public:
         QStyleOptionViewItem item(compactOption(option, index));
         initStyleOption(&item, index);
         if (index.parent().isValid()) {
-            editor->setGeometry(nameRect(item));
+            editor->setGeometry(nameRect(item, index.siblingAtColumn(1).data().toString()));
             return;
         }
         QStyledItemDelegate::updateEditorGeometry(editor, item, index);
     }
 
 private:
-    static int badgeWidth(const QStyleOptionViewItem &option)
+    static int badgeWidth(const QStyleOptionViewItem &option, const QString &operation)
     {
         QFont font = option.font;
         font.setPixelSize(8);
         font.setWeight(QFont::DemiBold);
-        return QFontMetrics(font).horizontalAdvance(QStringLiteral("OPTIONS")) + 10;
+        const QFontMetrics metrics(font);
+        const int textWidth = metrics.horizontalAdvance(operation);
+        const int previousWidth = metrics.horizontalAdvance(QStringLiteral("OPTIONS")) + 10;
+        return textWidth + (qMax(0, previousWidth - textWidth) + 1) / 2;
     }
 
-    QRect nameRect(const QStyleOptionViewItem &option) const
+    QRect nameRect(const QStyleOptionViewItem &option, const QString &operation) const
     {
-        const int prefix = badgeWidth(option) + 14;
+        const int prefix = badgeWidth(option, operation) + 14;
         return m_tree->isRightToLeft() ? option.rect.adjusted(8, 0, -prefix, 0)
                                       : option.rect.adjusted(prefix, 0, -8, 0);
     }
@@ -309,7 +456,7 @@ void buttonIcon(QAbstractButton *button, const QString &name, const QString &ton
 {
     button->setProperty("iconName", name);
     button->setProperty("iconTone", tone);
-    button->setIcon(AppTheme::icon(name, tone.isEmpty() ? QColor{} : AppTheme::color(tone)));
+    button->setIcon(AppTheme::icon(name, tone.isEmpty() ? QStringView(u"secondary") : QStringView(tone)));
     button->setIconSize(QSize(16, 16));
     button->setCursor(Qt::PointingHandCursor);
 }
@@ -405,6 +552,13 @@ QLabel *fieldLabel(const QString &text, QWidget *parent)
     return label;
 }
 
+QLabel *fieldLabel(const char *source, QWidget *parent)
+{
+    auto *label = fieldLabel(QString{}, parent);
+    UiLanguage::set(label, "text", source);
+    return label;
+}
+
 QFrame *card(QWidget *parent)
 {
     auto *frame = new QFrame(parent);
@@ -412,12 +566,13 @@ QFrame *card(QWidget *parent)
     return frame;
 }
 
-QLabel *counterLabel(const QString &caption, QLabel **value, QWidget *parent,
+QLabel *counterLabel(const char *caption, QLabel **value, QWidget *parent,
                      QHBoxLayout *layout)
 {
     auto *box = new QVBoxLayout;
     box->setSpacing(0);
-    auto *name = new QLabel(caption, parent);
+    auto *name = new QLabel(parent);
+    UiLanguage::set(name, "text", caption);
     name->setObjectName(QStringLiteral("statName"));
     *value = new QLabel(QStringLiteral("0"), parent);
     (*value)->setObjectName(QStringLiteral("statValue"));
@@ -452,7 +607,7 @@ public:
         m_editButton = new QToolButton(this);
         m_editButton->setObjectName(QStringLiteral("editNameButton"));
         buttonIcon(m_editButton, QStringLiteral("edit"));
-        m_editButton->setToolTip(UiLanguage::text("Переименовать"));
+        UiLanguage::set(m_editButton, "toolTip", "Переименовать");
         m_editButton->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
         layout->addWidget(m_editButton);
         m_editor = new QLineEdit(this);
@@ -581,7 +736,7 @@ public:
         editorCard->setObjectName(QStringLiteral("requestEditorCard"));
         m_editorCard = editorCard;
         auto *editorLayout = new QVBoxLayout(editorCard);
-        editorLayout->setContentsMargins(20, 12, 20, 10);
+        editorLayout->setContentsMargins(24, 12, 24, 10);
         editorLayout->setSpacing(10);
         // Scroll a short viewport instead of compressing fields below their text.
         editorLayout->setVerticalSizeConstraint(QLayout::SetMinimumSize);
@@ -589,7 +744,7 @@ public:
         m_collectionLink = new QPushButton(collection.name, editorCard);
         m_collectionLink->setObjectName(QStringLiteral("breadcrumbButton"));
         m_collectionLink->setMaximumWidth(220);
-        m_collectionLink->setToolTip(UiLanguage::text("Открыть коллекцию"));
+        UiLanguage::set(m_collectionLink, "toolTip", "Открыть коллекцию");
         buttonIcon(m_collectionLink, QStringLiteral("folder"));
         header->addWidget(m_collectionLink);
         connect(m_collectionLink, &QPushButton::clicked, this, [this] { if (m_actions.openCollection) m_actions.openCollection(); });
@@ -611,7 +766,7 @@ public:
 
         auto *mainRow = new QHBoxLayout;
         mainRow->setSpacing(8);
-        auto *addressBar = new QFrame(editorCard);
+        auto *addressBar = new AddressBar(editorCard);
         addressBar->setLayoutDirection(Qt::LeftToRight);
         addressBar->setObjectName(QStringLiteral("requestAddressBar"));
         addressBar->setFixedHeight(42);
@@ -621,7 +776,7 @@ public:
         mainRow->addWidget(addressBar, 1);
         m_protocol = new QComboBox(editorCard);
         m_protocol->setObjectName(QStringLiteral("requestProtocol"));
-        m_protocol->setAccessibleName(UiLanguage::text("Протокол"));
+        UiLanguage::set(m_protocol, "accessibleName", "Протокол");
         for (const auto protocol : {RequestProtocol::Http, RequestProtocol::Tcp,
                                     RequestProtocol::Udp, RequestProtocol::Serial}) {
             m_protocol->addItem(requestProtocolName(protocol), static_cast<int>(protocol));
@@ -629,7 +784,7 @@ public:
         m_protocol->setFixedWidth(85);
         addressLayout->addWidget(m_protocol);
         m_method = new QComboBox(editorCard);
-        m_method->setAccessibleName(UiLanguage::text("HTTP-метод"));
+        UiLanguage::set(m_method, "accessibleName", "HTTP-метод");
         m_method->setObjectName(QStringLiteral("httpMethod"));
         for (const auto method : {HttpMethod::Get, HttpMethod::Post, HttpMethod::Put,
              HttpMethod::Patch, HttpMethod::Delete, HttpMethod::Head, HttpMethod::Options})
@@ -637,28 +792,31 @@ public:
         m_method->setFixedWidth(95);
         addressLayout->addWidget(m_method);
         m_target = new QLineEdit(editorCard);
-        m_target->setAccessibleName(UiLanguage::text("Путь HTTP-запроса"));
+        UiLanguage::set(m_target, "accessibleName", "Путь HTTP-запроса");
         m_target->setObjectName(QStringLiteral("requestTarget"));
         m_target->setPlaceholderText(QStringLiteral("/path?query=value"));
         addressLayout->addWidget(m_target, 1);
         m_transportAddress = new QLineEdit(editorCard);
         m_transportAddress->setReadOnly(true);
         m_transportAddress->setObjectName(QStringLiteral("transportAddress"));
-        m_transportAddress->setAccessibleName(UiLanguage::text("Адрес соединения"));
-        m_transportAddress->setToolTip(UiLanguage::text("Адрес и порт задаются на вкладке «Параметры»"));
+        UiLanguage::set(m_transportAddress, "accessibleName", "Адрес соединения");
+        UiLanguage::set(m_transportAddress, "toolTip", "Адрес и порт задаются на вкладке «Параметры»");
         addressLayout->addWidget(m_transportAddress, 1);
-        m_send = new QPushButton(UiLanguage::text("Отправить") + QStringLiteral("    ↵"), editorCard);
+        m_send = new SendButton(QString{}, editorCard);
+        UiLanguage::set(m_send, "text", "Отправить");
         m_send->setObjectName(QStringLiteral("sendButton"));
         m_send->setFixedHeight(42);
-        m_send->setMinimumWidth(160);
-        m_send->setAccessibleName(UiLanguage::text("Отправить"));
+        m_send->setMinimumWidth(qMax(160, m_send->fontMetrics().horizontalAdvance(UiLanguage::text("Отправить")) + 90));
+        UiLanguage::set(m_send, "accessibleName", "Отправить");
         mainRow->addWidget(m_send);
-        m_start = new QPushButton(UiLanguage::text("Старт"), editorCard);
+        m_start = new QPushButton(QString{}, editorCard);
+        UiLanguage::set(m_start, "text", "Старт");
         m_start->setObjectName(QStringLiteral("primaryButton"));
         m_start->setFixedHeight(42);
         m_start->setMinimumWidth(90);
         mainRow->addWidget(m_start);
-        m_stop = new QPushButton(UiLanguage::text("Стоп"), editorCard);
+        m_stop = new QPushButton(QString{}, editorCard);
+        UiLanguage::set(m_stop, "text", "Стоп");
         m_stop->setObjectName(QStringLiteral("dangerButton"));
         m_stop->hide();
         editorLayout->addLayout(mainRow);
@@ -681,9 +839,9 @@ public:
         m_editorTabs->setDrawBase(false);
         m_editorTabs->setIconSize(QSize(14, 14));
         m_editorTabs->setProperty("tabIconNames", QStringList{QStringLiteral("code"), QStringLiteral("headers"), QStringLiteral("settings")});
-        m_editorTabs->addTab(AppTheme::icon(u"code"), UiLanguage::text("Тело запроса"));
-        m_editorTabs->addTab(AppTheme::icon(u"headers"), UiLanguage::text("Заголовки"));
-        m_editorTabs->addTab(AppTheme::icon(u"settings"), UiLanguage::text("Параметры"));
+        UiLanguage::addTab(m_editorTabs, "Тело запроса", AppTheme::icon(u"code"));
+        UiLanguage::addTab(m_editorTabs, "Заголовки", AppTheme::icon(u"headers"));
+        UiLanguage::addTab(m_editorTabs, "Параметры", AppTheme::icon(u"settings"));
         editorLayout->addWidget(m_editorTabs);
         m_editorPages = new ActivePageStack(editorCard);
         auto *bodyPage = new QWidget(m_editorPages);
@@ -703,10 +861,10 @@ public:
         buttonIcon(m_send, QStringLiteral("send"), QStringLiteral("onAccent"));
         buttonIcon(m_start, QStringLiteral("play"));
         buttonIcon(m_stop, QStringLiteral("stop"), QStringLiteral("red"));
-        m_send->setToolTip(UiLanguage::text("Отправить один раз · Ctrl+Enter"));
-        m_start->setText(UiLanguage::text("Цикл"));
-        m_start->setToolTip(UiLanguage::text("Запустить периодическую отправку · F5"));
-        m_stop->setToolTip(UiLanguage::text("Остановить отправку · F5"));
+        UiLanguage::set(m_send, "toolTip", "Отправить один раз · Ctrl+Enter");
+        UiLanguage::set(m_start, "text", "Цикл");
+        UiLanguage::set(m_start, "toolTip", "Запустить периодическую отправку · F5");
+        UiLanguage::set(m_stop, "toolTip", "Остановить отправку · F5");
 
         auto *common = new QGridLayout;
         m_commonGrid = common;
@@ -715,13 +873,15 @@ public:
         m_portOwn = new QCheckBox(editorCard);
         m_intervalOwn = new QCheckBox(editorCard);
         m_parallelOwn = new QCheckBox(editorCard);
-        const auto addHeader = [common, editorCard](QCheckBox *own, const QString &text,
+        const auto addHeader = [common, editorCard](QCheckBox *own, const char *text,
                                                     int column) {
             auto *header = new QWidget(editorCard);
             auto *layout = new QHBoxLayout(header);
             layout->setContentsMargins(0, 0, 0, 0);
             layout->setSpacing(4);
-            own->setAccessibleName(UiLanguage::text("Своё значение: %1").arg(text));
+            UiLanguage::bind(own, "accessibleName", [own, text] {
+                own->setAccessibleName(UiLanguage::text("Своё значение: %1").arg(UiLanguage::text(text)));
+            });
             own->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
             layout->addWidget(own);
             layout->addWidget(fieldLabel(text, header));
@@ -729,14 +889,19 @@ public:
             common->addWidget(header, 0, column);
             return header;
         };
-        m_hostHeader = addHeader(m_hostOwn, UiLanguage::text("АДРЕС"), 0);
-        m_portHeader = addHeader(m_portOwn, UiLanguage::text("ПОРТ"), 1);
-        addHeader(m_intervalOwn, UiLanguage::text("ИНТЕРВАЛ, МС"), 2);
-        m_parallelHeader = addHeader(m_parallelOwn, UiLanguage::text("ПАРАЛЛЕЛЬНО"), 3);
+        m_hostHeader = addHeader(m_hostOwn, "АДРЕС", 0);
+        m_portHeader = addHeader(m_portOwn, "ПОРТ", 1);
+        addHeader(m_intervalOwn, "ИНТЕРВАЛ, МС", 2);
+        m_parallelHeader = addHeader(m_parallelOwn, "ПАРАЛЛЕЛЬНО", 3);
         m_host = new QLineEdit(editorCard);
+        m_host->setObjectName(QStringLiteral("requestHost"));
         m_host->setLayoutDirection(Qt::LeftToRight);
+        UiLanguage::set(m_host, "toolTip", "Для HTTP можно указать общий путь: example.com/api. Путь запроса добавляется к нему.");
         m_port = new QSpinBox(editorCard);
-        m_port->setRange(1, 65535);
+        m_port->setObjectName(QStringLiteral("requestPort"));
+        m_port->setRange(0, 65535);
+        UiLanguage::set(m_port, "specialValueText", "По умолчанию");
+        UiLanguage::set(m_port, "toolTip", "По умолчанию: HTTP — 80, HTTPS — 443. Для TCP/UDP укажите порт.");
         m_interval = new QSpinBox(editorCard);
         m_interval->setRange(1, 86'400'000);
         m_interval->setGroupSeparatorShown(true);
@@ -756,20 +921,20 @@ public:
         m_httpOptions = new QWidget(settingsPage);
         auto *httpLayout = new QHBoxLayout(m_httpOptions);
         httpLayout->setContentsMargins(0, 4, 0, 4);
-        httpLayout->addWidget(fieldLabel(UiLanguage::text("СОЕДИНЕНИЕ"), m_httpOptions));
+        httpLayout->addWidget(fieldLabel("СОЕДИНЕНИЕ", m_httpOptions));
         m_httpScheme = new QComboBox(m_httpOptions);
         m_httpScheme->setObjectName(QStringLiteral("httpScheme"));
         m_httpScheme->addItem(QStringLiteral("HTTP"), QStringLiteral("http"));
         m_httpScheme->addItem(QStringLiteral("HTTPS"), QStringLiteral("https"));
-        m_httpScheme->setToolTip(UiLanguage::text("HTTPS проверяет сертификат сервера. Порт задаётся отдельно."));
+        UiLanguage::set(m_httpScheme, "toolTip", "HTTPS проверяет сертификат сервера. По умолчанию: HTTP — 80, HTTPS — 443.");
         httpLayout->addWidget(m_httpScheme);
         httpLayout->addSpacing(16);
-        httpLayout->addWidget(fieldLabel(UiLanguage::text("ТАЙМ-АУТ HTTP, МС"), m_httpOptions));
+        httpLayout->addWidget(fieldLabel("ТАЙМ-АУТ HTTP, МС", m_httpOptions));
         m_httpTimeout = new QSpinBox(m_httpOptions);
         m_httpTimeout->setObjectName(QStringLiteral("httpTimeout"));
         m_httpTimeout->setRange(1, 86'400'000);
         m_httpTimeout->setGroupSeparatorShown(true);
-        m_httpTimeout->setToolTip(UiLanguage::text("Полный лимит времени HTTP-запроса, включая получение ответа."));
+        UiLanguage::set(m_httpTimeout, "toolTip", "Полный лимит времени HTTP-запроса, включая получение ответа.");
         httpLayout->addWidget(m_httpTimeout);
         httpLayout->addStretch();
         settingsLayout->addWidget(m_httpOptions);
@@ -777,17 +942,18 @@ public:
         m_socketOptions = new QWidget(editorCard);
         auto *socketOptionsLayout = new QHBoxLayout(m_socketOptions);
         socketOptionsLayout->setContentsMargins(0, 4, 0, 4);
-        m_waitForResponse = new QCheckBox(UiLanguage::text("Ожидать ответ"), m_socketOptions);
+        m_waitForResponse = new QCheckBox(QString{}, m_socketOptions);
+        UiLanguage::set(m_waitForResponse, "text", "Ожидать ответ");
         m_waitForResponse->setObjectName(QStringLiteral("waitForResponse"));
         socketOptionsLayout->addWidget(m_waitForResponse);
         socketOptionsLayout->addSpacing(16);
-        socketOptionsLayout->addWidget(fieldLabel(UiLanguage::text("ТАЙМ-АУТ, МС"), m_socketOptions));
+        socketOptionsLayout->addWidget(fieldLabel("ТАЙМ-АУТ, МС", m_socketOptions));
         m_timeout = new QSpinBox(m_socketOptions);
         m_timeout->setObjectName(QStringLiteral("socketTimeout"));
-        m_timeout->setAccessibleName(UiLanguage::text("Тайм-аут, мс"));
+        UiLanguage::set(m_timeout, "accessibleName", "Тайм-аут, мс");
         m_timeout->setRange(1, 86'400'000);
         m_timeout->setGroupSeparatorShown(true);
-        m_timeout->setToolTip(UiLanguage::text("Лимит подключения и отправки; при ожидании ответа — длительность окна приёма после отправки"));
+        UiLanguage::set(m_timeout, "toolTip", "Лимит подключения и отправки; при ожидании ответа — длительность окна приёма после отправки");
         socketOptionsLayout->addWidget(m_timeout);
         socketOptionsLayout->addStretch();
         settingsLayout->addWidget(m_socketOptions);
@@ -795,28 +961,36 @@ public:
         m_transportHint->setObjectName(QStringLiteral("subtitleLabel"));
         m_transportHint->setWordWrap(true);
         settingsLayout->addWidget(m_transportHint);
-        auto *inheritHint = new QLabel(UiLanguage::text("Параметры наследуются из коллекции. Отметьте поле, чтобы задать своё значение."), settingsPage);
+        auto *inheritHint = new QLabel(QString{}, settingsPage);
+        UiLanguage::set(inheritHint, "text", "Параметры наследуются из коллекции. Отметьте поле, чтобы задать своё значение.");
         inheritHint->setObjectName(QStringLiteral("subtitleLabel"));
         inheritHint->setWordWrap(true);
         settingsLayout->addWidget(inheritHint);
         settingsLayout->addStretch();
 
-        m_bodyLabel = fieldLabel(UiLanguage::text("ТЕЛО POST · application/json · UTF-8"), editorCard);
+        m_bodyLabel = fieldLabel("ТЕЛО POST · application/json · UTF-8", editorCard);
         auto *bodyToolbar = new QHBoxLayout;
         bodyToolbar->addWidget(m_bodyLabel);
+        m_bodyByteCount = new QLabel(bodyPage);
+        m_bodyByteCount->setObjectName(QStringLiteral("bodyByteCount"));
+        m_bodyByteCount->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
+        UiLanguage::set(m_bodyByteCount, "accessibleName", "Размер тела при отправке, в байтах");
+        bodyToolbar->addWidget(m_bodyByteCount);
         bodyToolbar->addStretch();
-        m_formatBody = new QPushButton(UiLanguage::text("Форматировать JSON"), bodyPage);
+        m_formatBody = new QPushButton(QString{}, bodyPage);
+        UiLanguage::set(m_formatBody, "text", "Форматировать JSON");
         m_formatBody->setObjectName(QStringLiteral("compactButton"));
         buttonIcon(m_formatBody, QStringLiteral("code"));
         bodyToolbar->addWidget(m_formatBody);
         bodyLayout->addLayout(bodyToolbar);
         m_body = new RequestBodyEditor(editorCard);
-        m_bodyHighlighter = new PayloadHighlighter(m_body->document());
+        m_bodyHighlighter = new PayloadHighlighter(m_body->document(), m_body);
         m_body->setPlaceholderText(QStringLiteral("{\n    \"message\": \"value\"\n}"));
         m_body->setMinimumHeight(74);
         m_body->setObjectName(QStringLiteral("codeEditor"));
         bodyLayout->addWidget(m_body, 1);
-        m_bodyEmpty = new QLabel(UiLanguage::text("У GET-запроса нет тела\nПараметры запроса можно указать в адресной строке."), bodyPage);
+        m_bodyEmpty = new QLabel(QString{}, bodyPage);
+        UiLanguage::set(m_bodyEmpty, "text", "У GET-запроса нет тела\nПараметры запроса можно указать в адресной строке.");
         m_bodyEmpty->setObjectName(QStringLiteral("emptyHint"));
         m_bodyEmpty->setAlignment(Qt::AlignCenter);
         m_bodyEmpty->setMinimumHeight(72);
@@ -836,8 +1010,7 @@ public:
             if (error.error != QJsonParseError::NoError || json.isNull()) {
                 m_validation->setText(QStringLiteral("JSON: %1").arg(error.errorString()));
                 m_validation->setProperty("state", QStringLiteral("invalid"));
-                m_validation->style()->unpolish(m_validation);
-                m_validation->style()->polish(m_validation);
+                m_validation->update();
                 return;
             }
             QTextCursor cursor = m_body->textCursor();
@@ -890,6 +1063,10 @@ public:
         connect(m_stop, &QPushButton::clicked, this, [this] { m_actions.stop(); });
         connectEditorSignals();
         setDefinition(request, collection);
+        UiLanguage::onChange(this, [this] {
+            refreshEffective();
+            m_send->setMinimumWidth(qMax(160, m_send->fontMetrics().horizontalAdvance(m_send->text()) + 90));
+        });
     }
 
     void setDefinition(const RequestDefinition &request, const CollectionDefinition &collection)
@@ -917,7 +1094,9 @@ public:
             static_cast<int>(request.serial.flowControl)));
         m_waitForResponse->setChecked(request.waitForResponse);
         m_timeout->setValue(request.timeoutMs);
-        m_target->setText(request.target);
+        // Local edits echo back through setDefinition; do not reset the cursor,
+        // selection or undo stack by assigning unchanged text.
+        if (m_target->text() != request.target) m_target->setText(request.target);
         m_method->setCurrentIndex(m_method->findData(static_cast<int>(request.method)));
         m_httpScheme->setCurrentIndex(m_httpScheme->findData(request.httpScheme));
         m_httpTimeout->setValue(request.httpTimeoutMs);
@@ -927,7 +1106,8 @@ public:
         if (m_body->toPlainText() != request.body) {
             m_body->setPlainText(request.body);
         }
-        m_host->setText(request.host.overridden ? request.host.value : collection.host);
+        const QString host = request.host.overridden ? request.host.value : collection.host;
+        if (m_host->text() != host) m_host->setText(host);
         m_port->setValue(request.port.overridden ? request.port.value : collection.port);
         m_interval->setValue(request.intervalMs.overridden
                                  ? request.intervalMs.value : collection.intervalMs);
@@ -952,15 +1132,13 @@ public:
         if (m_start->property("running").toBool() != busy || m_start->property("iconName").toString().isEmpty()) {
             m_start->setProperty("running", busy);
             buttonIcon(m_start, busy ? QStringLiteral("stop") : QStringLiteral("play"), busy ? QStringLiteral("red") : QStringLiteral("secondary"));
-            m_start->style()->unpolish(m_start);
-            m_start->style()->polish(m_start);
+            m_start->update();
         }
         m_stop->setEnabled(running || counters.active > 0);
         m_runtime->setText(busy ? UiLanguage::text("● %1 · %2 активно").arg(running ? UiLanguage::text("В цикле") : UiLanguage::text("Отправка")).arg(counters.active) : QString{});
         m_runtime->setProperty("mode", running ? QStringLiteral("running")
                                                 : QStringLiteral("idle"));
-        m_runtime->style()->unpolish(m_runtime);
-        m_runtime->style()->polish(m_runtime);
+        m_runtime->update();
         m_logPane->setClearEnabled(counters.active == 0);
     }
 
@@ -1021,7 +1199,7 @@ private:
             grid->setColumnStretch(column, 1);
         }
 
-        grid->addWidget(fieldLabel(UiLanguage::text("COM-ПОРТ"), m_serialOptions), 0, 0);
+        grid->addWidget(fieldLabel("COM-ПОРТ", m_serialOptions), 0, 0);
         auto *portRow = new QWidget(m_serialOptions);
         auto *portLayout = new QHBoxLayout(portRow);
         portLayout->setContentsMargins(0, 0, 0, 0);
@@ -1029,68 +1207,67 @@ private:
         m_serialPort = new QComboBox(portRow);
         m_serialPort->setLayoutDirection(Qt::LeftToRight);
         m_serialPort->setObjectName(QStringLiteral("serialPort"));
-        m_serialPort->setAccessibleName(UiLanguage::text("COM-порт"));
+        UiLanguage::set(m_serialPort, "accessibleName", "COM-порт");
         m_serialPort->setEditable(true);
         m_serialPort->setInsertPolicy(QComboBox::NoInsert);
         m_serialPort->setCompleter(nullptr);
         m_serialPort->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
         m_serialPort->setMinimumContentsLength(6);
-        m_serialPort->setToolTip(UiLanguage::text("Выберите доступный порт или введите имя вручную, например COM3."));
+        UiLanguage::set(m_serialPort, "toolTip", "Выберите доступный порт или введите имя вручную, например COM3.");
         portLayout->addWidget(m_serialPort, 1);
-        auto *refreshPorts = new QPushButton(UiLanguage::text("Обновить"), portRow);
+        auto *refreshPorts = new QPushButton(QString{}, portRow);
+        UiLanguage::set(refreshPorts, "text", "Обновить");
         refreshPorts->setObjectName(QStringLiteral("refreshSerialPorts"));
-        refreshPorts->setAccessibleName(UiLanguage::text("Обновить список COM-портов"));
-        refreshPorts->setToolTip(UiLanguage::text("Обновить доступные COM-порты, сохранив выбранное имя."));
+        UiLanguage::set(refreshPorts, "accessibleName", "Обновить список COM-портов");
+        UiLanguage::set(refreshPorts, "toolTip", "Обновить доступные COM-порты, сохранив выбранное имя.");
         portLayout->addWidget(refreshPorts);
         grid->addWidget(portRow, 1, 0);
         connect(refreshPorts, &QPushButton::clicked, this, [this] { refreshSerialPorts(); });
 
-        const auto addCombo = [this, grid](const QString &label, const QString &name,
+        const auto addCombo = [this, grid](const char *label, const QString &name,
                                           int row, int column) {
             grid->addWidget(fieldLabel(label, m_serialOptions), row, column);
             auto *combo = new QComboBox(m_serialOptions);
             combo->setObjectName(name);
-            combo->setAccessibleName(label);
+            UiLanguage::set(combo, "accessibleName", label);
             grid->addWidget(combo, row + 1, column);
             return combo;
         };
-        m_serialBaudRate = addCombo(UiLanguage::text("СКОРОСТЬ, БОД"),
+        m_serialBaudRate = addCombo("СКОРОСТЬ, БОД",
                                     QStringLiteral("serialBaudRate"), 0, 1);
         m_serialBaudRate->setEditable(true);
         m_serialBaudRate->setInsertPolicy(QComboBox::NoInsert);
         m_serialBaudRate->setCompleter(nullptr);
         m_serialBaudRate->setValidator(new QIntValidator(
             1, std::numeric_limits<qint32>::max(), m_serialBaudRate));
-        m_serialBaudRate->setToolTip(UiLanguage::text("Выберите стандартную скорость или введите свою."));
+        UiLanguage::set(m_serialBaudRate, "toolTip", "Выберите стандартную скорость или введите свою.");
         for (const qint32 rate : QSerialPortInfo::standardBaudRates()) {
             m_serialBaudRate->addItem(QString::number(rate));
         }
-        m_serialDataBits = addCombo(UiLanguage::text("БИТЫ ДАННЫХ"),
+        m_serialDataBits = addCombo("БИТЫ ДАННЫХ",
                                     QStringLiteral("serialDataBits"), 0, 2);
         for (const auto bits : {QSerialPort::Data5, QSerialPort::Data6,
                                 QSerialPort::Data7, QSerialPort::Data8}) {
             m_serialDataBits->addItem(QString::number(static_cast<int>(bits)),
                                       static_cast<int>(bits));
         }
-        m_serialParity = addCombo(UiLanguage::text("ЧЁТНОСТЬ"),
+        m_serialParity = addCombo("ЧЁТНОСТЬ",
                                   QStringLiteral("serialParity"), 2, 0);
-        m_serialParity->addItem(UiLanguage::text("Нет"), static_cast<int>(QSerialPort::NoParity));
-        m_serialParity->addItem(UiLanguage::text("Чётная (Even)"), static_cast<int>(QSerialPort::EvenParity));
-        m_serialParity->addItem(UiLanguage::text("Нечётная (Odd)"), static_cast<int>(QSerialPort::OddParity));
-        m_serialParity->addItem(UiLanguage::text("Всегда 1 (Mark)"), static_cast<int>(QSerialPort::MarkParity));
-        m_serialParity->addItem(UiLanguage::text("Всегда 0 (Space)"), static_cast<int>(QSerialPort::SpaceParity));
-        m_serialStopBits = addCombo(UiLanguage::text("СТОП-БИТЫ"),
+        UiLanguage::addItem(m_serialParity, "Нет", static_cast<int>(QSerialPort::NoParity));
+        UiLanguage::addItem(m_serialParity, "Чётная (Even)", static_cast<int>(QSerialPort::EvenParity));
+        UiLanguage::addItem(m_serialParity, "Нечётная (Odd)", static_cast<int>(QSerialPort::OddParity));
+        UiLanguage::addItem(m_serialParity, "Всегда 1 (Mark)", static_cast<int>(QSerialPort::MarkParity));
+        UiLanguage::addItem(m_serialParity, "Всегда 0 (Space)", static_cast<int>(QSerialPort::SpaceParity));
+        m_serialStopBits = addCombo("СТОП-БИТЫ",
                                     QStringLiteral("serialStopBits"), 2, 1);
         m_serialStopBits->addItem(QStringLiteral("1"), static_cast<int>(QSerialPort::OneStop));
         m_serialStopBits->addItem(QStringLiteral("1.5"), static_cast<int>(QSerialPort::OneAndHalfStop));
         m_serialStopBits->addItem(QStringLiteral("2"), static_cast<int>(QSerialPort::TwoStop));
-        m_serialFlowControl = addCombo(UiLanguage::text("УПРАВЛЕНИЕ ПОТОКОМ"),
+        m_serialFlowControl = addCombo("УПРАВЛЕНИЕ ПОТОКОМ",
                                        QStringLiteral("serialFlowControl"), 2, 2);
-        m_serialFlowControl->addItem(UiLanguage::text("Нет"), static_cast<int>(QSerialPort::NoFlowControl));
-        m_serialFlowControl->addItem(UiLanguage::text("Аппаратное (RTS/CTS)"),
-                                     static_cast<int>(QSerialPort::HardwareControl));
-        m_serialFlowControl->addItem(UiLanguage::text("Программное (XON/XOFF)"),
-                                     static_cast<int>(QSerialPort::SoftwareControl));
+        UiLanguage::addItem(m_serialFlowControl, "Нет", static_cast<int>(QSerialPort::NoFlowControl));
+        UiLanguage::addItem(m_serialFlowControl, "Аппаратное (RTS/CTS)", static_cast<int>(QSerialPort::HardwareControl));
+        UiLanguage::addItem(m_serialFlowControl, "Программное (XON/XOFF)", static_cast<int>(QSerialPort::SoftwareControl));
         refreshSerialPorts();
         return m_serialOptions;
     }
@@ -1183,7 +1360,7 @@ private:
         });
         connect(m_target, &QLineEdit::textChanged, this, [this, notifyChanged] {
             if (m_updating) return;
-            m_request.target = m_target->text().trimmed();
+            m_request.target = m_target->text();
             notifyChanged();
         });
         connect(m_method, &QComboBox::currentIndexChanged, this, [this, notifyChanged] {
@@ -1198,7 +1375,7 @@ private:
         });
         connect(m_host, &QLineEdit::textChanged, this, [this, notifyChanged] {
             if (m_updating || !m_hostOwn->isChecked()) return;
-            m_request.host.value = m_host->text().trimmed();
+            m_request.host.value = m_host->text();
             notifyChanged();
         });
         connect(m_port, &QSpinBox::valueChanged, this, [this, notifyChanged] {
@@ -1220,7 +1397,7 @@ private:
             if (m_updating) return;
             m_request.host.overridden = own;
             if (own) {
-                m_request.host.value = m_host->text().trimmed();
+                m_request.host.value = m_host->text();
             } else {
                 m_updating = true;
                 m_host->setText(m_collection.host);
@@ -1273,13 +1450,22 @@ private:
         m_interval->setEnabled(m_intervalOwn->isChecked());
         m_parallel->setEnabled(m_parallelOwn->isChecked());
         m_hostOwn->setToolTip(UiLanguage::text("Из коллекции: %1").arg(m_collection.host));
-        m_portOwn->setToolTip(UiLanguage::text("Из коллекции: %1").arg(m_collection.port));
+        m_portOwn->setToolTip(UiLanguage::text("Из коллекции: %1").arg(m_collection.port == 0
+            ? UiLanguage::text("По умолчанию") : QString::number(m_collection.port)));
         m_intervalOwn->setToolTip(UiLanguage::text("Из коллекции: %1 мс").arg(m_collection.intervalMs));
         m_parallelOwn->setToolTip(UiLanguage::text("Из коллекции: %1").arg(m_collection.maxInFlight));
         const RequestConfig config = resolveRequestConfig(m_collection, m_request);
+        const bool sendsBody = config.protocol != RequestProtocol::Http || httpMethodHasBody(config.method);
+        const SocketPayload payload = config.protocol == RequestProtocol::Http
+            ? SocketPayload{sendsBody ? config.body.toUtf8() : QByteArray{}, {}, {}}
+            : parseSocketPayload(config.body);
+        m_bodyByteCount->setText(payload.error.isEmpty()
+            ? UiLanguage::text("%1 Б").arg(payload.bytes.size()) : QStringLiteral("—"));
+        m_bodyByteCount->setToolTip(payload.error.isEmpty()
+            ? UiLanguage::text("Размер тела при отправке, в байтах") : payload.error);
         const QString endpoint = buildRequestUrl(config).toString(QUrl::FullyEncoded);
         m_effectiveUrl->setText(UiLanguage::text("%1  ·  %2 мс  ·  %3").arg(
-            config.protocol == RequestProtocol::Serial ? config.serial.portName : QStringLiteral("%1:%2").arg(config.host).arg(config.port))
+            config.protocol == RequestProtocol::Serial ? config.serial.portName : endpoint)
             .arg(config.intervalMs).arg(config.protocol == RequestProtocol::Serial
                 ? UiLanguage::text("%1 бод").arg(config.serial.baudRate) : UiLanguage::text("до %1 параллельно").arg(config.maxInFlight)));
         if (m_transportAddress->text() != endpoint) {
@@ -1292,8 +1478,7 @@ private:
         m_validation->setToolTip(error);
         m_validation->setProperty("state", error.isEmpty() ? QStringLiteral("valid")
                                                             : QStringLiteral("invalid"));
-        m_validation->style()->unpolish(m_validation);
-        m_validation->style()->polish(m_validation);
+        m_validation->update();
         m_send->setEnabled(error.isEmpty());
         m_start->setEnabled(m_running || m_activeOperations > 0 || error.isEmpty());
         const bool http = config.protocol == RequestProtocol::Http;
@@ -1315,8 +1500,12 @@ private:
         const QString methodName = httpMethodName(config.method);
         if (m_method->property("method").toString() != methodName) {
             m_method->setProperty("method", methodName);
-            m_method->style()->unpolish(m_method);
-            m_method->style()->polish(m_method);
+            m_method->update();
+        }
+        const QString protocolName = requestProtocolName(config.protocol);
+        if (m_protocol->property("protocol").toString() != protocolName) {
+            m_protocol->setProperty("protocol", protocolName);
+            m_protocol->update();
         }
         m_httpOptions->setVisible(http);
         m_editorTabs->setTabVisible(1, http);
@@ -1337,11 +1526,11 @@ private:
                 : UiLanguage::text("Порт открывается для каждой отправки. Успех означает передачу байтов драйверу. "
                                  "На одном COM-порту выполняется только одна операция."));
         } else if (!config.waitForResponse) {
-            m_transportHint->setText(UiLanguage::text("Успех означает отправку данных; получение сервером не подтверждается."));
+            UiLanguage::set(m_transportHint, "text", "Успех означает отправку данных; получение сервером не подтверждается.");
         } else if (config.protocol == RequestProtocol::Tcp) {
-            m_transportHint->setText(UiLanguage::text("Ответ TCP собирается до закрытия соединения или конца тайм-аута. Без данных — ошибка ожидания."));
+            UiLanguage::set(m_transportHint, "text", "Ответ TCP собирается до закрытия соединения или конца тайм-аута. Без данных — ошибка ожидания.");
         } else {
-            m_transportHint->setText(UiLanguage::text("Ожидание одной ответной UDP-датаграммы до тайм-аута."));
+            UiLanguage::set(m_transportHint, "text", "Ожидание одной ответной UDP-датаграммы до тайм-аута.");
         }
         m_bodyLabel->setText(http ? UiLanguage::text("ТЕЛО %1 · UTF-8").arg(httpMethodName(config.method))
                                  : UiLanguage::text("ДАННЫЕ %1 · UTF-8 / \\xHH").arg(requestProtocolName(config.protocol)));
@@ -1435,6 +1624,7 @@ private:
     QPushButton *m_formatBody = nullptr;
     PayloadHighlighter *m_bodyHighlighter = nullptr;
     QLabel *m_bodyLabel = nullptr;
+    QLabel *m_bodyByteCount = nullptr;
     QLineEdit *m_host = nullptr;
     QSpinBox *m_port = nullptr;
     QSpinBox *m_interval = nullptr;
@@ -1488,7 +1678,7 @@ public:
         auto *settingsCard = card(this);
         settingsCard->setObjectName(QStringLiteral("collectionEditorCard"));
         auto *settingsLayout = new QVBoxLayout(settingsCard);
-        settingsLayout->setContentsMargins(20, 14, 20, 12);
+        settingsLayout->setContentsMargins(24, 14, 24, 12);
         settingsLayout->setSpacing(10);
         auto *header = new QHBoxLayout;
         m_title = new EditableTitle(collection.name, [this](const QString &name) {
@@ -1506,8 +1696,8 @@ public:
         editorTabs->setDrawBase(false);
         editorTabs->setIconSize(QSize(14, 14));
         editorTabs->setProperty("tabIconNames", QStringList{QStringLiteral("activity"), QStringLiteral("settings")});
-        editorTabs->addTab(AppTheme::icon(u"activity"), UiLanguage::text("Запросы"));
-        editorTabs->addTab(AppTheme::icon(u"settings"), UiLanguage::text("Настройки коллекции"));
+        UiLanguage::addTab(editorTabs, "Запросы", AppTheme::icon(u"activity"));
+        UiLanguage::addTab(editorTabs, "Настройки коллекции", AppTheme::icon(u"settings"));
         auto *pages = new ActivePageStack(settingsCard);
         auto *requestsPage = new QWidget(pages);
         auto *requestsLayout = new QVBoxLayout(requestsPage);
@@ -1523,14 +1713,23 @@ public:
 
         auto *grid = new QGridLayout;
         grid->setHorizontalSpacing(10);
-        grid->addWidget(fieldLabel(UiLanguage::text("АДРЕС"), settingsCard), 0, 0);
-        grid->addWidget(fieldLabel(UiLanguage::text("ПОРТ"), settingsCard), 0, 1);
-        grid->addWidget(fieldLabel(UiLanguage::text("ИНТЕРВАЛ, МС"), settingsCard), 0, 2);
-        grid->addWidget(fieldLabel(UiLanguage::text("ПАРАЛЛЕЛЬНО НА ЗАПРОС"), settingsCard), 0, 3);
+        grid->addWidget(fieldLabel("АДРЕС", settingsCard), 0, 0);
+        m_portCustom = new QCheckBox(settingsCard);
+        m_portCustom->setObjectName(QStringLiteral("collectionCustomPort"));
+        UiLanguage::set(m_portCustom, "text", "Задать порт");
+        UiLanguage::set(m_portCustom, "toolTip", "По умолчанию: HTTP — 80, HTTPS — 443. Для TCP/UDP укажите порт.");
+        grid->addWidget(m_portCustom, 0, 1);
+        grid->addWidget(fieldLabel("ИНТЕРВАЛ, МС", settingsCard), 0, 2);
+        grid->addWidget(fieldLabel("ПАРАЛЛЕЛЬНО НА ЗАПРОС", settingsCard), 0, 3);
         m_host = new QLineEdit(settingsCard);
+        m_host->setObjectName(QStringLiteral("collectionHost"));
         m_host->setLayoutDirection(Qt::LeftToRight);
+        UiLanguage::set(m_host, "toolTip", "Для HTTP можно указать общий путь: example.com/api. Путь запроса добавляется к нему.");
         m_port = new QSpinBox(settingsCard);
-        m_port->setRange(1, 65535);
+        m_port->setObjectName(QStringLiteral("collectionPort"));
+        m_port->setRange(0, 65535);
+        UiLanguage::set(m_port, "specialValueText", "По умолчанию");
+        UiLanguage::set(m_port, "toolTip", "По умолчанию: HTTP — 80, HTTPS — 443. Для TCP/UDP укажите порт.");
         m_interval = new QSpinBox(settingsCard);
         m_interval->setRange(1, 86'400'000);
         m_interval->setGroupSeparatorShown(true);
@@ -1546,21 +1745,25 @@ public:
         grid->setColumnStretch(2, 2);
         grid->setColumnStretch(3, 2);
         parametersLayout->addLayout(grid);
-        auto *inheritanceHelp = new QLabel(UiLanguage::text("Общие параметры для запросов коллекции. Каждый запрос может переопределить их в своих настройках."), parametersPage);
+        auto *inheritanceHelp = new QLabel(QString{}, parametersPage);
+        UiLanguage::set(inheritanceHelp, "text", "Общие параметры для запросов коллекции. Каждый запрос может переопределить их в своих настройках.");
         inheritanceHelp->setObjectName(QStringLiteral("helperText"));
         inheritanceHelp->setWordWrap(true);
         parametersLayout->addWidget(inheritanceHelp);
 
         auto *actionLayout = new QHBoxLayout;
-        m_start = new QPushButton(UiLanguage::text("Запустить всё"), settingsCard);
+        m_start = new QPushButton(QString{}, settingsCard);
+        UiLanguage::set(m_start, "text", "Запустить всё");
         m_start->setObjectName(QStringLiteral("primaryButton"));
         actionLayout->addWidget(m_start);
         buttonIcon(m_start, QStringLiteral("play"), QStringLiteral("accent"));
-        m_stop = new QPushButton(UiLanguage::text("Стоп"), settingsCard);
+        m_stop = new QPushButton(QString{}, settingsCard);
+        UiLanguage::set(m_stop, "text", "Стоп");
         m_stop->setObjectName(QStringLiteral("dangerButton"));
         actionLayout->addWidget(m_stop);
         buttonIcon(m_stop, QStringLiteral("stop"), QStringLiteral("red"));
-        m_status = new QLabel(UiLanguage::text("● Остановлено"), settingsCard);
+        m_status = new QLabel(QString{}, settingsCard);
+        UiLanguage::set(m_status, "text", "● Остановлено");
         m_status->setObjectName(QStringLiteral("statusPill"));
         actionLayout->addWidget(m_status);
         header->addLayout(actionLayout);
@@ -1568,30 +1771,33 @@ public:
 
         auto *stats = new QHBoxLayout;
         stats->setSpacing(28);
-        counterLabel(UiLanguage::text("ОТПРАВЛЕНО"), &m_sent, settingsCard, stats);
-        counterLabel(UiLanguage::text("ЗАВЕРШЕНО"), &m_completed, settingsCard, stats);
-        counterLabel(UiLanguage::text("ОШИБКИ"), &m_errors, settingsCard, stats);
-        counterLabel(UiLanguage::text("ПРОПУЩЕНО"), &m_skipped, settingsCard, stats);
-        counterLabel(UiLanguage::text("АКТИВНО"), &m_active, settingsCard, stats);
+        counterLabel("ОТПРАВЛЕНО", &m_sent, settingsCard, stats);
+        counterLabel("ЗАВЕРШЕНО", &m_completed, settingsCard, stats);
+        counterLabel("ОШИБКИ", &m_errors, settingsCard, stats);
+        counterLabel("ПРОПУЩЕНО", &m_skipped, settingsCard, stats);
+        counterLabel("АКТИВНО", &m_active, settingsCard, stats);
         stats->addStretch();
         parametersLayout->addLayout(stats);
         parametersLayout->addStretch();
         auto *requestRow = new QHBoxLayout;
-        requestRow->addWidget(fieldLabel(UiLanguage::text("ЗАПРОСЫ КОЛЛЕКЦИИ"), settingsCard));
+        requestRow->addWidget(fieldLabel("ЗАПРОСЫ КОЛЛЕКЦИИ", settingsCard));
         requestRow->addStretch();
-        auto *newRequest = new QPushButton(UiLanguage::text("Добавить"), settingsCard);
+        auto *newRequest = new QPushButton(QString{}, settingsCard);
+        UiLanguage::set(newRequest, "text", "Добавить");
         newRequest->setObjectName(QStringLiteral("compactButton"));
         requestRow->addWidget(newRequest);
-        auto *openRequest = new QPushButton(UiLanguage::text("Открыть"), settingsCard);
+        auto *openRequest = new QPushButton(QString{}, settingsCard);
+        UiLanguage::set(openRequest, "text", "Открыть");
         openRequest->setObjectName(QStringLiteral("compactButton"));
         requestRow->addWidget(openRequest);
-        m_toggleRequest = new QPushButton(UiLanguage::text("Запустить"), settingsCard);
+        m_toggleRequest = new QPushButton(QString{}, settingsCard);
+        UiLanguage::set(m_toggleRequest, "text", "Запустить");
         m_toggleRequest->setObjectName(QStringLiteral("compactButton"));
         requestRow->addWidget(m_toggleRequest);
         requestsLayout->addLayout(requestRow);
         m_requests = new QListWidget(settingsCard);
         m_requests->setObjectName(QStringLiteral("collectionRequests"));
-        m_requests->setAccessibleName(UiLanguage::text("Запросы коллекции"));
+        UiLanguage::set(m_requests, "accessibleName", "Запросы коллекции");
         m_requests->setItemDelegate(new CollectionRequestDelegate(m_requests));
         m_requests->setMinimumHeight(100);
         m_requests->setMaximumHeight(200);
@@ -1652,19 +1858,33 @@ public:
         connect(m_stop, &QPushButton::clicked, this, [this] { m_actions.stop(); });
         const auto changed = [this] {
             if (m_updating) return;
-            m_collection.host = m_host->text().trimmed();
+            m_collection.host = m_host->text();
             m_collection.port = static_cast<quint16>(m_port->value());
+            {
+                const QSignalBlocker blocker(m_portCustom);
+                m_portCustom->setChecked(m_collection.port != 0);
+            }
+            m_port->setEnabled(m_collection.port != 0);
             m_collection.intervalMs = m_interval->value();
             m_collection.maxInFlight = m_parallel->value();
             updateSummary();
             if (m_actions.changed) m_actions.changed(m_collection);
         };
         connect(m_host, &QLineEdit::textChanged, this, changed);
+        connect(m_portCustom, &QCheckBox::toggled, this, [this, changed](bool custom) {
+            if (m_updating) return;
+            {
+                const QSignalBlocker blocker(m_port);
+                m_port->setValue(custom ? (m_port->value() == 0 ? 80 : m_port->value()) : 0);
+            }
+            changed();
+        });
         connect(m_port, &QSpinBox::valueChanged, this, changed);
         connect(m_interval, &QSpinBox::valueChanged, this, changed);
         connect(m_parallel, &QSpinBox::valueChanged, this, changed);
         setDefinition(collection);
         m_logPane->modelReplaced();
+        UiLanguage::onChange(this, [this] { updateSummary(); updateRequestButton(); m_requests->viewport()->update(); });
     }
 
     void setDefinition(const CollectionDefinition &collection)
@@ -1672,8 +1892,10 @@ public:
         m_updating = true;
         m_collection = collection;
         m_title->setText(collection.name);
-        m_host->setText(collection.host);
+        if (m_host->text() != collection.host) m_host->setText(collection.host);
         m_port->setValue(collection.port);
+        m_portCustom->setChecked(collection.port != 0);
+        m_port->setEnabled(collection.port != 0);
         m_interval->setValue(collection.intervalMs);
         m_parallel->setValue(collection.maxInFlight);
         m_updating = false;
@@ -1705,8 +1927,7 @@ public:
             : UiLanguage::text("● Остановлено"));
         m_status->setProperty("mode", runningCount > 0 ? QStringLiteral("running")
                                                         : QStringLiteral("idle"));
-        m_status->style()->unpolish(m_status);
-        m_status->style()->polish(m_status);
+        m_status->update();
         m_logPane->setClearEnabled(counters.active == 0);
         refreshRequests();
     }
@@ -1738,7 +1959,6 @@ private:
             item->setData(Qt::UserRole + 2, address);
             item->setData(Qt::UserRole + 3, busy);
             item->setToolTip(QStringLiteral("%1\n%2").arg(request.name, address));
-            item->setForeground(AppTheme::color(busy ? u"accent" : u"text"));
             if (request.id == selected) m_requests->setCurrentItem(item);
         }
         if (!m_requests->currentItem() && m_requests->count()) m_requests->setCurrentRow(0);
@@ -1747,9 +1967,10 @@ private:
 
     void updateSummary()
     {
-        m_summary->setText(UiLanguage::text("%1:%2 · %3 запросов")
+        m_summary->setText(UiLanguage::text("%1 · порт: %2 · %3 запросов")
                                .arg(m_collection.host)
-                               .arg(m_collection.port)
+                               .arg(m_collection.port == 0 ? UiLanguage::text("По умолчанию")
+                                                          : QString::number(m_collection.port))
                                .arg(m_collection.requests.size()));
     }
 
@@ -1759,6 +1980,7 @@ private:
     LogPane *m_logPane = nullptr;
     EditableTitle *m_title = nullptr;
     QLineEdit *m_host = nullptr;
+    QCheckBox *m_portCustom = nullptr;
     QSpinBox *m_port = nullptr;
     QSpinBox *m_interval = nullptr;
     QSpinBox *m_parallel = nullptr;
@@ -1814,11 +2036,6 @@ MainWindow::~MainWindow()
     m_sessions.clear();
 }
 
-QString MainWindow::applicationStyleSheet()
-{
-    return AppTheme::styleSheet();
-}
-
 void MainWindow::setupUi()
 {
     setWindowTitle(QStringLiteral("%1 %2").arg(QCoreApplication::applicationName(),
@@ -1849,26 +2066,28 @@ void MainWindow::setupUi()
     edition->setObjectName(QStringLiteral("appEdition"));
     header->addWidget(edition);
     header->addStretch();
-    auto *workspaceCaption = new QLabel(UiLanguage::text("●  Рабочее пространство  /  Локально"), appHeader);
+    auto *workspaceCaption = new QLabel(QString{}, appHeader);
+    UiLanguage::set(workspaceCaption, "text", "●  Рабочее пространство  /  Локально");
     workspaceCaption->setObjectName(QStringLiteral("workspaceCaption"));
     header->addWidget(workspaceCaption);
     header->addStretch();
-    auto *workspace = new QPushButton(UiLanguage::text("Действия"), appHeader);
+    auto *workspace = new QPushButton(QString{}, appHeader);
+    UiLanguage::set(workspace, "text", "Действия");
     workspace->setObjectName(QStringLiteral("compactButton"));
     auto *workspaceMenu = new QMenu(workspace);
-    workspaceMenu->addAction(UiLanguage::text("Импорт коллекций…"), this, &MainWindow::importWorkspace);
-    workspaceMenu->addAction(UiLanguage::text("Экспорт всех коллекций…"), this, [this] { exportWorkspace(); });
+    UiLanguage::action(workspaceMenu->addAction(QString{}, this, &MainWindow::importWorkspace), "Импорт коллекций…");
+    UiLanguage::action(workspaceMenu->addAction(QString{}, this, [this] { exportWorkspace(); }), "Экспорт всех коллекций…");
     workspaceMenu->addSeparator();
-    workspaceMenu->addAction(UiLanguage::text("Сохранить всё · Ctrl+S"), this, &MainWindow::saveAll);
-    workspaceMenu->addAction(UiLanguage::text("Открыть папку данных"), this, [this] {
+    UiLanguage::action(workspaceMenu->addAction(QString{}, this, &MainWindow::saveAll), "Сохранить всё · Ctrl+S");
+    UiLanguage::action(workspaceMenu->addAction(QString{}, this, [this] {
         QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(m_workspaceStore.workspacePath()).absolutePath()));
-    });
+    }), "Открыть папку данных");
     workspace->setMenu(workspaceMenu);
     header->addWidget(workspace);
     auto *languageButton = new QPushButton(UiLanguage::current().toUpper(), appHeader);
     languageButton->setObjectName(QStringLiteral("languageButton"));
-    languageButton->setToolTip(UiLanguage::text("Язык интерфейса"));
-    languageButton->setAccessibleName(UiLanguage::text("Язык интерфейса"));
+    UiLanguage::set(languageButton, "toolTip", "Язык интерфейса");
+    UiLanguage::set(languageButton, "accessibleName", "Язык интерфейса");
     auto *languageMenu = new QMenu(languageButton);
     auto *languageGroup = new QActionGroup(languageMenu);
     for (const auto &code : UiLanguage::available()) {
@@ -1882,9 +2101,15 @@ void MainWindow::setupUi()
                 for (auto *item : languageGroup->actions()) item->setChecked(item->data().toString() == UiLanguage::current());
         });
     }
+    UiLanguage::onChange(languageButton, [languageButton, languageGroup] {
+        languageButton->setText(UiLanguage::current().toUpper());
+        for (auto *item : languageGroup->actions())
+            item->setChecked(item->data().toString() == UiLanguage::current());
+    });
     languageButton->setMenu(languageMenu);
     header->addWidget(languageButton);
-    m_stopAllButton = new QPushButton(UiLanguage::text("Стоп всё"), appHeader);
+    m_stopAllButton = new QPushButton(QString{}, appHeader);
+    UiLanguage::set(m_stopAllButton, "text", "Стоп всё");
     m_stopAllButton->setObjectName(QStringLiteral("dangerButton"));
     buttonIcon(m_stopAllButton, QStringLiteral("stop"), QStringLiteral("red"));
     connect(m_stopAllButton, &QPushButton::clicked, this, &MainWindow::stopAll);
@@ -1892,7 +2117,7 @@ void MainWindow::setupUi()
     header->addSpacing(12);
     m_themeButton = new QPushButton(appHeader);
     m_themeButton->setObjectName(QStringLiteral("themeButton"));
-    m_themeButton->setAccessibleName(UiLanguage::text("Переключить тему"));
+    UiLanguage::set(m_themeButton, "accessibleName", "Переключить тему");
     header->addWidget(m_themeButton);
     updateThemeButton();
     layout->addWidget(appHeader);
@@ -1904,18 +2129,21 @@ void MainWindow::setupUi()
     auto *sidebarLayout = new QVBoxLayout(sidebar);
     sidebarLayout->setContentsMargins(12, 18, 10, 12);
     sidebarLayout->setSpacing(12);
-    m_workspaceHome = new QPushButton(UiLanguage::text("Моё пространство"), sidebar);
+    m_workspaceHome = new QPushButton(QString{}, sidebar);
+    UiLanguage::set(m_workspaceHome, "text", "Моё пространство");
     m_workspaceHome->setObjectName(QStringLiteral("workspaceHomeButton"));
     m_workspaceHome->setCheckable(true);
     buttonIcon(m_workspaceHome, QStringLiteral("home"));
-    m_workspaceHome->setToolTip(UiLanguage::text("Обзор коллекций и общий журнал"));
+    UiLanguage::set(m_workspaceHome, "toolTip", "Обзор коллекций и общий журнал");
     connect(m_workspaceHome, &QPushButton::clicked, this, &MainWindow::showOverview);
     sidebarLayout->addWidget(m_workspaceHome);
-    auto *workspaceHint = new QLabel(UiLanguage::text("Коллекции и подключения"), sidebar);
+    auto *workspaceHint = new QLabel(QString{}, sidebar);
+    UiLanguage::set(workspaceHint, "text", "Коллекции и подключения");
     workspaceHint->setObjectName(QStringLiteral("workspaceHomeCaption"));
     sidebarLayout->addWidget(workspaceHint);
     auto *captionRow = new QHBoxLayout;
-    auto *caption = new QLabel(UiLanguage::text("КОЛЛЕКЦИИ"), sidebar);
+    auto *caption = new QLabel(QString{}, sidebar);
+    UiLanguage::set(caption, "text", "КОЛЛЕКЦИИ");
     caption->setObjectName(QStringLiteral("sidebarSection"));
     captionRow->addWidget(caption);
     m_collectionCount = new QLabel(sidebar);
@@ -1924,26 +2152,29 @@ void MainWindow::setupUi()
     captionRow->addStretch();
     m_addCollectionButton = new QPushButton(sidebar);
     m_addCollectionButton->setObjectName(QStringLiteral("toolbarButton"));
-    m_addCollectionButton->setToolTip(UiLanguage::text("Создать коллекцию"));
-    m_addCollectionButton->setAccessibleName(UiLanguage::text("Создать коллекцию"));
+    UiLanguage::set(m_addCollectionButton, "toolTip", "Создать коллекцию");
+    UiLanguage::set(m_addCollectionButton, "accessibleName", "Создать коллекцию");
     buttonIcon(m_addCollectionButton, QStringLiteral("folder-plus"));
     captionRow->addWidget(m_addCollectionButton);
     m_search = new QLineEdit(sidebar);
     m_search->setObjectName(QStringLiteral("sidebarSearch"));
-    m_search->setPlaceholderText(UiLanguage::text("Найти запрос…"));
-    m_search->setAccessibleName(UiLanguage::text("Поиск по коллекциям и запросам"));
+    UiLanguage::set(m_search, "placeholderText", "Найти запрос…");
+    UiLanguage::set(m_search, "accessibleName", "Поиск по коллекциям и запросам");
     m_search->setClearButtonEnabled(true);
     m_search->addAction(AppTheme::icon(u"search"), QLineEdit::LeadingPosition);
-    m_search->setToolTip(UiLanguage::text("Поиск по имени, протоколу или адресу · Ctrl+K"));
+    UiLanguage::set(m_search, "toolTip", "Поиск по имени, протоколу или адресу · Ctrl+K");
     sidebarLayout->addWidget(m_search);
     sidebarLayout->addSpacing(6);
     sidebarLayout->addLayout(captionRow);
-    m_addRequestButton = new QPushButton(UiLanguage::text("Новый запрос"), sidebar);
+    m_addRequestButton = new QPushButton(QString{}, sidebar);
+    UiLanguage::set(m_addRequestButton, "text", "Новый запрос");
     m_addRequestButton->setObjectName(QStringLiteral("breadcrumbButton"));
     buttonIcon(m_addRequestButton, QStringLiteral("plus"));
     m_tree = new CollectionTreeWidget(sidebar);
     m_tree->setColumnCount(2);
-    m_tree->setHeaderLabels({UiLanguage::text("Запрос"), UiLanguage::text("Тип")});
+    UiLanguage::bind(m_tree, "headers", [this] {
+        m_tree->setHeaderLabels({UiLanguage::text("Запрос"), UiLanguage::text("Тип")});
+    });
     m_tree->setHeaderHidden(true);
     m_tree->header()->setStretchLastSection(false);
     m_tree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
@@ -1962,19 +2193,22 @@ void MainWindow::setupUi()
     m_tree->setAnimated(true);
     m_tree->setUniformRowHeights(true);
     m_tree->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    m_searchEmpty = new QLabel(UiLanguage::text("Ничего не найдено\nПопробуйте другой запрос"), sidebar);
+    m_searchEmpty = new QLabel(QString{}, sidebar);
+    UiLanguage::set(m_searchEmpty, "text", "Ничего не найдено\nПопробуйте другой запрос");
     m_searchEmpty->setObjectName(QStringLiteral("emptyHint"));
     m_searchEmpty->setAlignment(Qt::AlignCenter);
     m_searchEmpty->setWordWrap(true);
     m_searchEmpty->hide();
     sidebarLayout->addWidget(m_searchEmpty);
     auto *transfers = new QHBoxLayout;
-    auto *import = new QPushButton(UiLanguage::text("Импорт"), sidebar);
+    auto *import = new QPushButton(QString{}, sidebar);
+    UiLanguage::set(import, "text", "Импорт");
     import->setObjectName(QStringLiteral("transferButton"));
     buttonIcon(import, QStringLiteral("download"));
     connect(import, &QPushButton::clicked, this, &MainWindow::importWorkspace);
     transfers->addWidget(import);
-    auto *exportAll = new QPushButton(UiLanguage::text("Экспорт"), sidebar);
+    auto *exportAll = new QPushButton(QString{}, sidebar);
+    UiLanguage::set(exportAll, "text", "Экспорт");
     exportAll->setObjectName(QStringLiteral("transferButton"));
     buttonIcon(exportAll, QStringLiteral("upload"));
     connect(exportAll, &QPushButton::clicked, this, [this] { exportWorkspace(); });
@@ -1984,7 +2218,7 @@ void MainWindow::setupUi()
     dataDirectory->setObjectName(QStringLiteral("dataDirectoryButton"));
     dataDirectory->setMinimumHeight(68);
     dataDirectory->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
-    dataDirectory->setAccessibleName(UiLanguage::text("Данные на этом компьютере"));
+    UiLanguage::set(dataDirectory, "accessibleName", "Данные на этом компьютере");
     dataDirectory->setCursor(Qt::PointingHandCursor);
     auto *directoryLayout = new QHBoxLayout(dataDirectory);
     directoryLayout->setContentsMargins(7, 10, 7, 10);
@@ -1992,9 +2226,11 @@ void MainWindow::setupUi()
     directoryLayout->addWidget(new ThemeIcon(QStringLiteral("database"), dataDirectory));
     auto *directoryText = new QVBoxLayout;
     directoryText->setSpacing(4);
-    auto *directoryTitle = new QLabel(UiLanguage::text("Данные на этом компьютере"), dataDirectory);
+    auto *directoryTitle = new QLabel(QString{}, dataDirectory);
+    UiLanguage::set(directoryTitle, "text", "Данные на этом компьютере");
     directoryTitle->setObjectName(QStringLiteral("dataDirectoryTitle"));
-    auto *directoryHint = new QLabel(UiLanguage::text("Открыть папку коллекций и истории"), dataDirectory);
+    auto *directoryHint = new QLabel(QString{}, dataDirectory);
+    UiLanguage::set(directoryHint, "text", "Открыть папку коллекций и истории");
     directoryHint->setObjectName(QStringLiteral("dataDirectoryHint"));
     for (auto *label : {directoryTitle, directoryHint}) {
         label->setAttribute(Qt::WA_TransparentForMouseEvents);
@@ -2003,7 +2239,7 @@ void MainWindow::setupUi()
     }
     directoryLayout->addLayout(directoryText, 1);
     directoryLayout->addWidget(new ThemeIcon(QStringLiteral("external"), dataDirectory));
-    dataDirectory->setToolTip(UiLanguage::text("Открыть папку коллекций и истории"));
+    UiLanguage::set(dataDirectory, "toolTip", "Открыть папку коллекций и истории");
     connect(dataDirectory, &QPushButton::clicked, this, [this] {
         QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(m_workspaceStore.workspacePath()).absolutePath()));
     });
@@ -2011,7 +2247,7 @@ void MainWindow::setupUi()
     m_workspaceSplitter->addWidget(sidebar);
 
     m_workspacePages = new QStackedWidget(m_workspaceSplitter);
-    m_tabs = new QTabWidget(m_workspacePages);
+    m_tabs = new WorkspaceTabs(m_workspacePages);
     m_tabs->setObjectName(QStringLiteral("workspaceTabs"));
     m_tabs->tabBar()->setObjectName(QStringLiteral("workspaceTabBar"));
     m_tabs->setTabsClosable(true);
@@ -2032,11 +2268,13 @@ void MainWindow::setupUi()
     eyebrow->setObjectName(QStringLiteral("eyebrow"));
     overviewLayout->addWidget(eyebrow);
     auto *overviewRow = new QHBoxLayout;
-    auto *emptyTitle = new QLabel(UiLanguage::text("Все подключения под рукой."), overviewCard);
+    auto *emptyTitle = new QLabel(QString{}, overviewCard);
+    UiLanguage::set(emptyTitle, "text", "Все подключения под рукой.");
     emptyTitle->setObjectName(QStringLiteral("overviewTitle"));
     overviewRow->addWidget(emptyTitle);
     overviewRow->addStretch();
-    auto *create = new QPushButton(UiLanguage::text("Новый запрос"), overviewCard);
+    auto *create = new QPushButton(QString{}, overviewCard);
+    UiLanguage::set(create, "text", "Новый запрос");
     create->setObjectName(QStringLiteral("sendButton"));
     buttonIcon(create, QStringLiteral("plus"), QStringLiteral("onAccent"));
     overviewRow->addWidget(create);
@@ -2047,7 +2285,7 @@ void MainWindow::setupUi()
     overviewLayout->addWidget(m_overviewSummary);
     auto *metrics = new QHBoxLayout;
     metrics->setSpacing(24);
-    for (const auto &caption : {UiLanguage::text("Коллекции"), UiLanguage::text("Запросы"), UiLanguage::text("В цикле"), UiLanguage::text("Записи истории")}) {
+    for (const auto *caption : {"Коллекции", "Запросы", "В цикле", "Записи истории"}) {
         auto *container = new QWidget(overviewCard);
         container->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
         auto *metric = new QVBoxLayout(container);
@@ -2057,7 +2295,8 @@ void MainWindow::setupUi()
         value->setObjectName(QStringLiteral("overviewMetricValue"));
         m_overviewMetrics.append(value);
         metric->addWidget(value);
-        auto *label = new QLabel(caption, overviewCard);
+        auto *label = new QLabel(overviewCard);
+        UiLanguage::set(label, "text", caption);
         label->setObjectName(QStringLiteral("overviewMetricLabel"));
         metric->addWidget(label);
         metrics->addWidget(container, 1);
@@ -2094,14 +2333,61 @@ void MainWindow::setupUi()
     m_workspaceSplitter->setSizes({260, 1160});
     layout->addWidget(m_workspaceSplitter, 1);
     statusBar()->setSizeGripEnabled(false);
-    m_saveStatus = new QLabel(UiLanguage::text("●  Всё сохранено"), this);
+    m_saveStatus = new QLabel(QString{}, this);
+    UiLanguage::set(m_saveStatus, "text", "●  Всё сохранено");
     m_saveStatus->setObjectName(QStringLiteral("savedStatus"));
     statusBar()->addWidget(m_saveStatus);
-    auto *keys = new QLabel(UiLanguage::text("Ctrl+Enter  отправить     F5  цикл     Ctrl+K  поиск"), this);
-    keys->setObjectName(QStringLiteral("statusText"));
+    auto *keys = new QToolButton(this);
+    UiLanguage::set(keys, "text", "Горячие клавиши");
+    keys->setObjectName(QStringLiteral("toolbarButton"));
+    keys->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    buttonIcon(keys, QStringLiteral("keyboard"));
+    connect(keys, &QToolButton::clicked, this, [keys] {
+        auto *popup = new QFrame(keys, Qt::Popup);
+        popup->setObjectName(QStringLiteral("shortcutPopup"));
+        popup->setAttribute(Qt::WA_DeleteOnClose);
+        auto *grid = new QGridLayout(popup);
+        grid->setContentsMargins(16, 14, 16, 14);
+        grid->setHorizontalSpacing(24);
+        grid->setVerticalSpacing(10);
+        auto *title = new QLabel(QString{}, popup);
+        UiLanguage::set(title, "text", "Горячие клавиши");
+        title->setObjectName(QStringLiteral("sectionTitle"));
+        grid->addWidget(title, 0, 0);
+        auto *close = new QToolButton(popup);
+        close->setObjectName(QStringLiteral("toolbarButton"));
+        buttonIcon(close, QStringLiteral("close"));
+        UiLanguage::set(close, "accessibleName", "Закрыть");
+        connect(close, &QToolButton::clicked, popup, &QWidget::close);
+        grid->addWidget(close, 0, 1, Qt::AlignRight);
+        int row = 1;
+        for (const auto &[caption, shortcut] : {
+                std::pair{UiLanguage::text("Отправить запрос"), QStringLiteral("Ctrl + Enter")},
+                {UiLanguage::text("Запустить / остановить цикл"), QStringLiteral("F5")},
+                {UiLanguage::text("Перейти к адресу / данным"), QStringLiteral("Ctrl + L")},
+                {UiLanguage::text("Найти запрос"), QStringLiteral("Ctrl + K")},
+                {UiLanguage::text("Сохранить изменения"), QStringLiteral("Ctrl + S")},
+                {UiLanguage::text("Сменить тему"), QStringLiteral("Ctrl + Shift + T")}}) {
+            grid->addWidget(new QLabel(caption, popup), row, 0);
+            auto *key = new QLabel(shortcut, popup);
+            key->setObjectName(QStringLiteral("keycap"));
+            grid->addWidget(key, row++, 1, Qt::AlignRight);
+        }
+        auto *escape = new QShortcut(QKeySequence(Qt::Key_Escape), popup);
+        connect(escape, &QShortcut::activated, popup, &QWidget::close);
+        popup->adjustSize();
+        QPoint position = keys->mapToGlobal(QPoint(keys->width() - popup->width(), -popup->height() - 8));
+        const QRect available = keys->screen()->availableGeometry();
+        position.setX(qBound(available.left(), position.x(), qMax(available.left(), available.right() - popup->width())));
+        position.setY(qBound(available.top(), position.y(), qMax(available.top(), available.bottom() - popup->height())));
+        popup->move(position);
+        popup->show();
+    });
     statusBar()->addPermanentWidget(keys);
-    auto *version = new QLabel(QStringLiteral("   v%1").arg(QCoreApplication::applicationVersion()), this);
+    auto *version = new QLabel(QStringLiteral("v%1").arg(QCoreApplication::applicationVersion()), this);
     version->setObjectName(QStringLiteral("statusText"));
+    version->setContentsMargins(12, 0, 14, 0);
+    version->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Preferred);
     statusBar()->addPermanentWidget(version);
 }
 
@@ -2120,7 +2406,6 @@ void MainWindow::toggleTheme()
     AppTheme::apply(theme);
     m_uiSettings.theme = AppTheme::themeName(theme);
     updateThemeButton();
-    refreshTreeStatuses();
     saveUiSettings();
 }
 
@@ -2540,7 +2825,8 @@ void MainWindow::openRequest(const QUuid &requestId)
     m_requestTabs.insert(requestId, tab);
     const int index = m_tabs->addTab(tab,
         QStringLiteral("%1  %2").arg(requestOperationName(definition->protocol, definition->method), definition->name));
-    requestTabLabel(m_tabs, index, requestOperationName(definition->protocol, definition->method), definition->name);
+    requestTabLabel(m_tabs, index, requestOperationName(definition->protocol, definition->method), definition->name,
+                        runtime->controller->isRunning() || runtime->controller->counters().active > 0);
     addTabCloseButton(tab, index);
     m_tabs->setCurrentIndex(index);
     tab->updateRuntime(runtime->controller->isRunning(), runtime->controller->counters());
@@ -2617,8 +2903,8 @@ void MainWindow::addTabCloseButton(QWidget *tab, int index)
 {
     auto *button = new QToolButton(m_tabs->tabBar());
     button->setObjectName(QStringLiteral("tabCloseButton"));
-    button->setAccessibleName(UiLanguage::text("Закрыть вкладку"));
-    button->setToolTip(UiLanguage::text("Закрыть вкладку"));
+    UiLanguage::set(button, "accessibleName", "Закрыть вкладку");
+    UiLanguage::set(button, "toolTip", "Закрыть вкладку");
     button->setFixedSize(20, 20);
     buttonIcon(button, QStringLiteral("close"));
     m_tabs->tabBar()->setTabButton(index, QTabBar::RightSide, button);
@@ -2650,7 +2936,8 @@ void MainWindow::refreshRequestTab(const QUuid &requestId)
     tab->updateRuntime(runtime->controller->isRunning(), runtime->controller->counters());
     const int index = tabIndex(QStringLiteral("request"), requestId);
     if (index >= 0)
-        requestTabLabel(m_tabs, index, requestOperationName(definition->protocol, definition->method), definition->name);
+        requestTabLabel(m_tabs, index, requestOperationName(definition->protocol, definition->method), definition->name,
+                        runtime->controller->isRunning() || runtime->controller->counters().active > 0);
 }
 
 void MainWindow::refreshCollectionTab(const QUuid &collectionId)
@@ -2667,8 +2954,11 @@ void MainWindow::refreshCollectionTab(const QUuid &collectionId)
     }
     tab->updateRuntime(counters, running, definition->requests.size());
     const int index = tabIndex(QStringLiteral("collection"), collectionId);
-    if (index >= 0) m_tabs->setTabText(index,
-        UiLanguage::text("Коллекция · %1").arg(definition->name));
+    if (index >= 0) {
+        const QString title = UiLanguage::text("Коллекция · %1").arg(definition->name);
+        m_tabs->setTabText(index, title);
+        m_tabs->setTabToolTip(index, title);
+    }
 }
 
 void MainWindow::refreshOpenTabs()
@@ -2686,26 +2976,17 @@ void MainWindow::refreshTreeStatuses()
     refreshOverview();
     for (int i = 0; i < m_tree->topLevelItemCount(); ++i) {
         QTreeWidgetItem *collectionItem = m_tree->topLevelItem(i);
-        collectionItem->setIcon(0, AppTheme::icon(u"folder"));
         bool collectionRunning = false;
         for (int j = 0; j < collectionItem->childCount(); ++j) {
             QTreeWidgetItem *requestItem = collectionItem->child(j);
             RequestSession *value = session(idFromItem(requestItem));
-            const bool running = value && value->controller->isRunning();
-            QFont font = requestItem->font(0);
-            font.setBold(running);
-            requestItem->setFont(0, font);
-            requestItem->setForeground(0, running ? AppTheme::color(u"accent")
-                                                  : AppTheme::color(u"text"));
+            const bool running = value && (value->controller->isRunning() || value->controller->counters().active > 0);
+            requestItem->setData(0, TreeBusyRole, running);
             requestItem->setToolTip(0, running ? UiLanguage::text("Периодический запрос выполняется")
                                                : UiLanguage::text("Остановлено"));
             collectionRunning = collectionRunning || running;
         }
-        QFont font = collectionItem->font(0);
-        font.setWeight(QFont::DemiBold);
-        collectionItem->setFont(0, font);
-        collectionItem->setForeground(0, collectionRunning
-            ? AppTheme::color(u"accent") : AppTheme::color(u"text"));
+        collectionItem->setData(0, TreeBusyRole, collectionRunning);
     }
 }
 
@@ -2855,14 +3136,14 @@ void MainWindow::showTreeContextMenu(const QPoint &position)
 {
     QTreeWidgetItem *item = m_tree->itemAt(position);
     QMenu menu(this);
-    QAction *newCollection = menu.addAction(UiLanguage::text("Новая коллекция"));
-    QAction *newRequest = menu.addAction(UiLanguage::text("Новый запрос"));
+    QAction *newCollection = menu.addAction(AppTheme::icon(u"folder-plus"), UiLanguage::text("Новая коллекция"));
+    QAction *newRequest = menu.addAction(AppTheme::icon(u"plus"), UiLanguage::text("Новый запрос"));
     menu.addSeparator();
-    QAction *open = item ? menu.addAction(UiLanguage::text("Открыть")) : nullptr;
-    QAction *rename = item ? menu.addAction(UiLanguage::text("Переименовать")) : nullptr;
-    QAction *duplicate = item ? menu.addAction(UiLanguage::text("Дублировать")) : nullptr;
-    QAction *remove = item ? menu.addAction(UiLanguage::text("Удалить")) : nullptr;
-    QAction *exportCollection = item ? menu.addAction(UiLanguage::text("Экспорт коллекции…")) : nullptr;
+    QAction *open = item ? menu.addAction(AppTheme::icon(u"external"), UiLanguage::text("Открыть")) : nullptr;
+    QAction *rename = item ? menu.addAction(AppTheme::icon(u"edit"), UiLanguage::text("Переименовать")) : nullptr;
+    QAction *duplicate = item ? menu.addAction(AppTheme::icon(u"copy"), UiLanguage::text("Дублировать")) : nullptr;
+    QAction *remove = item ? menu.addAction(AppTheme::icon(u"trash", u"red"), UiLanguage::text("Удалить")) : nullptr;
+    QAction *exportCollection = item ? menu.addAction(AppTheme::icon(u"upload"), UiLanguage::text("Экспорт коллекции…")) : nullptr;
     QAction *chosen = menu.exec(m_tree->viewport()->mapToGlobal(position));
     if (!chosen) return;
     if (chosen == newCollection) addCollection();
@@ -3144,7 +3425,7 @@ RequestCounters MainWindow::aggregateCounters(const QUuid &collectionId) const
 void MainWindow::scheduleWorkspaceSave()
 {
     if (!m_closing && m_workspaceSaveTimer) {
-        m_saveStatus->setText(UiLanguage::text("●  Сохранение…"));
+        UiLanguage::set(m_saveStatus, "text", "●  Сохранение…");
         m_workspaceSaveTimer->start();
     }
 }
@@ -3161,7 +3442,7 @@ bool MainWindow::saveWorkspace()
         showStorageError(UiLanguage::text("Не удалось сохранить коллекции: %1").arg(error));
         return false;
     }
-    m_saveStatus->setText(UiLanguage::text("●  Всё сохранено"));
+    UiLanguage::set(m_saveStatus, "text", "●  Всё сохранено");
     return true;
 }
 
@@ -3267,29 +3548,35 @@ bool MainWindow::changeLanguage(const QString &language)
 {
     const auto code = UiLanguage::normalized(language);
     if (code == UiLanguage::current()) return true;
-    const bool busy = std::ranges::any_of(m_sessions, [](const RequestSession *value) {
-        return value->controller->isRunning() || value->controller->counters().active > 0;
-    });
-    if (busy) {
-        QMessageBox dialog(QMessageBox::Question, UiLanguage::text("Смена языка"),
-            UiLanguage::text("Для смены языка нужно остановить текущие отправки. Остановить их и продолжить?"),
-            QMessageBox::NoButton, this);
-        auto *proceed = dialog.addButton(UiLanguage::text("Остановить и продолжить"), QMessageBox::AcceptRole);
-        dialog.addButton(QMessageBox::Cancel);
-        dialog.setDefaultButton(QMessageBox::Cancel);
-        dialog.exec();
-        if (dialog.clickedButton() != proceed) return false;
+    const bool directionChanged = (code == QStringLiteral("ar")) != isRightToLeft();
+    if (!UiLanguage::apply(code)) return false;
+    setUpdatesEnabled(false);
+    QApplication::setLayoutDirection(code == QStringLiteral("ar") ? Qt::RightToLeft : Qt::LeftToRight);
+    UiLanguage::retranslate();
+    if (directionChanged) AppTheme::apply(AppTheme::current());
+    updateThemeButton();
+    for (auto it = m_requestTabs.cbegin(); it != m_requestTabs.cend(); ++it) {
+        if (auto *runtime = session(it.key()))
+            it.value()->updateRuntime(runtime->controller->isRunning(), runtime->controller->counters());
     }
-    const auto oldLanguage = m_uiSettings.language;
+    for (auto it = m_collectionTabs.cbegin(); it != m_collectionTabs.cend(); ++it) {
+        const auto *definition = collection(it.key());
+        if (!definition) continue;
+        int running = 0;
+        for (const auto &request : definition->requests)
+            if (auto *runtime = session(request.id); runtime && runtime->controller->isRunning()) ++running;
+        it.value()->updateRuntime(aggregateCounters(it.key()), running, definition->requests.size());
+        const int index = tabIndex(QStringLiteral("collection"), it.key());
+        if (index >= 0) {
+            const QString title = UiLanguage::text("Коллекция · %1").arg(definition->name);
+            m_tabs->setTabText(index, title);
+            m_tabs->setTabToolTip(index, title);
+        }
+    }
+    refreshTreeStatuses();
     m_uiSettings.language = code;
-    m_restartForLanguage = true;
-    if (!close()) {
-        const QString error = statusBar()->currentMessage();
-        m_uiSettings.language = oldLanguage;
-        saveUiSettings();
-        QMessageBox::warning(this, UiLanguage::text("Смена языка"), error);
-        return false;
-    }
+    setUpdatesEnabled(true);
+    saveUiSettings();
     return true;
 }
 
@@ -3330,7 +3617,7 @@ void MainWindow::exportWorkspace(const QUuid &collectionId)
 
 void MainWindow::importWorkspace()
 {
-    const QString path = QFileDialog::getOpenFileName(this, UiLanguage::text("Импорт коллекций Qt / Electron"),
+    const QString path = QFileDialog::getOpenFileName(this, UiLanguage::text("Импорт коллекций"),
         {}, UiLanguage::text("Коллекции JSON (*.json)"));
     if (path.isEmpty()) return;
     Workspace incoming;
@@ -3413,7 +3700,7 @@ void MainWindow::replayEntry(const RequestLogEntry &entry)
         config.method = entry.method;
         config.host = entry.url.host();
         config.httpScheme = entry.url.scheme() == QStringLiteral("https") ? QStringLiteral("https") : QStringLiteral("http");
-        config.port = static_cast<quint16>(entry.url.port(config.httpScheme == QStringLiteral("https") ? 443 : 80));
+        config.port = static_cast<quint16>(entry.url.port(0));
         config.target = entry.url.path(QUrl::FullyEncoded);
         if (entry.url.hasQuery()) config.target += u'?' + entry.url.query(QUrl::FullyEncoded);
         config.body = entry.requestBody;
@@ -3460,12 +3747,7 @@ void MainWindow::closeEvent(QCloseEvent *event)
 {
     m_closing = true;
     for (RequestSession *value : std::as_const(m_sessions)) value->controller->stop();
-    if (!saveAll() && m_restartForLanguage) {
-        m_restartForLanguage = false;
-        m_closing = false;
-        event->ignore();
-        return;
-    }
+    saveAll();
     QMainWindow::closeEvent(event);
-    if (event->isAccepted()) QCoreApplication::exit(m_restartForLanguage ? UiLanguage::RestartExitCode : 0);
+    if (event->isAccepted()) QCoreApplication::exit(0);
 }
