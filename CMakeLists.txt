@@ -12,7 +12,20 @@ project(MultiSender VERSION "${MULTISENDER_VERSION}" LANGUAGES CXX)
 
 configure_file(src/appversion.h.in generated/appversion.h @ONLY)
 
-set(CMAKE_CXX_STANDARD 23)
+# CMake 3.30 models MSVC's latest dialect as CXX23; enable it explicitly below.
+if(MSVC)
+    set(CMAKE_CXX_STANDARD 23)
+else()
+    set(multisender_cxx_standards ${CMAKE_CXX_COMPILE_FEATURES})
+    list(FILTER multisender_cxx_standards INCLUDE REGEX "^cxx_std_[0-9]+$")
+    list(REMOVE_ITEM multisender_cxx_standards cxx_std_98)
+    list(SORT multisender_cxx_standards COMPARE NATURAL)
+    list(GET multisender_cxx_standards -1 multisender_latest_cxx)
+    string(REPLACE "cxx_std_" "" CMAKE_CXX_STANDARD "${multisender_latest_cxx}")
+    if(CMAKE_CXX_STANDARD LESS 23)
+        message(FATAL_ERROR "MultiSender requires a compiler and CMake with C++23 or newer support.")
+    endif()
+endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 option(BUILD_TESTING "Build automated tests" OFF)
@@ -77,6 +90,11 @@ qt_add_executable(MultiSender WIN32
     src/payloadhighlighter.h
 )
 target_link_libraries(MultiSender PRIVATE MultiSenderCore Qt6::Widgets)
+if(MSVC)
+    foreach(application_target IN ITEMS MultiSenderCore MultiSender)
+        target_compile_options(${application_target} PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:/std:c++latest>")
+    endforeach()
+endif()
 qt_add_resources(MultiSender "ui_translations"
     PREFIX "/i18n"
     BASE "src/i18n"
